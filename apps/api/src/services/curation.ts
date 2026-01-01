@@ -44,9 +44,24 @@ export async function getCurationCards(userId: string): Promise<CurationCard[]> 
   });
 
   // Get user preferences
-  const preferences = await prisma.curationPreferences.findUnique({
+  const dbPreferences = await prisma.curationPreferences.findUnique({
     where: { userId },
   });
+
+  // Convert database preferences to CurationPreferences type
+  const preferences: CurationPreferences | null = dbPreferences
+    ? {
+        primaryGoal: dbPreferences.primaryGoal
+          ? (dbPreferences.primaryGoal as "Calm" | "Focus" | "Sleep" | "Confidence" | "Reset")
+          : undefined,
+        voicePreference: dbPreferences.voicePreference
+          ? (dbPreferences.voicePreference as "More space" | "Balanced" | "More guidance")
+          : undefined,
+        soundPreference: dbPreferences.soundPreference
+          ? (dbPreferences.soundPreference as "Voice-forward" | "Balanced" | "Atmosphere-forward")
+          : undefined,
+      }
+    : null;
 
   // Get completed sessions (for YOUR BEST)
   const completedEvents = await prisma.sessionEvent.findMany({
@@ -122,7 +137,7 @@ function analyzeUserPatterns(
         return null;
       }
     })
-    .filter((t): t is number => t !== null && t < 90); // Early abandons
+    .filter((t): t is number => t !== null && t !== undefined && t < 90); // Early abandons
 
   // Get most common duration from completions
   const completedDurations: number[] = [];
@@ -276,6 +291,8 @@ async function buildYourBestCard(
 
   // Find the most completed session (simplified - in production, count completions per session)
   const bestSession = completedSessions[0];
+  if (!bestSession) return null;
+  
   const duration = bestSession.durationSec || 600;
 
   // Determine brain layer preset from session
@@ -370,9 +387,23 @@ export async function saveCurationPreferences(
  * Get curation preferences
  */
 export async function getCurationPreferences(userId: string): Promise<CurationPreferences | null> {
-  const prefs = await prisma.curationPreferences.findUnique({
+  const dbPrefs = await prisma.curationPreferences.findUnique({
     where: { userId },
   });
-  return prefs;
+
+  // Convert database preferences to CurationPreferences type
+  if (!dbPrefs) return null;
+
+  return {
+    primaryGoal: dbPrefs.primaryGoal
+      ? (dbPrefs.primaryGoal as "Calm" | "Focus" | "Sleep" | "Confidence" | "Reset")
+      : undefined,
+    voicePreference: dbPrefs.voicePreference
+      ? (dbPrefs.voicePreference as "More space" | "Balanced" | "More guidance")
+      : undefined,
+    soundPreference: dbPrefs.soundPreference
+      ? (dbPrefs.soundPreference as "Voice-forward" | "Balanced" | "Atmosphere-forward")
+      : undefined,
+  };
 }
 

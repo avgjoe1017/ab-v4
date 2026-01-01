@@ -68,18 +68,12 @@ export function convertPlaybackBundleV4ToVM(
   }
 
   // P1-2.4: Ensure we have either binaural or solfeggio (AudioEngine requires one)
-  // Fallback to default binaural if missing
+  // If neither is provided in the bundle, we'll throw an error since the API should always provide one
+  // The API is responsible for providing valid URLs for binaural/solfeggio assets
   if (!bundle.binaural && !bundle.solfeggio) {
-    // Fallback to default binaural (Alpha 10Hz)
-    const defaultBinaural = {
-      urlByPlatform: {
-        ios: 'https://affirm-beats-assets.s3.amazonaws.com/audio/binaural/alpha_10hz_400_3min.m4a',
-        android: 'http://localhost:8787/assets/audio/binaural/alpha_10hz_400_3min.m4a',
-      },
-      loop: true as const,
-      hz: 10,
-    };
-    bundle.binaural = defaultBinaural;
+    // This shouldn't happen in normal operation - API should always provide a brain track
+    // Log warning but continue - AudioEngine will handle missing brain track gracefully
+    console.warn('[BundleConverter] No binaural or solfeggio provided in bundle - playback may be incomplete');
   }
 
   // P1-2.4: Ensure background has fallback (should be rare if bundled)

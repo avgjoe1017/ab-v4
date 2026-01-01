@@ -61,6 +61,9 @@ export async function getColdStartRecommendation(
   // Default rule if no match
   if (!matchedRule) {
     matchedRule = rules.find((r) => r.name === "default") || rules[0];
+    if (!matchedRule) {
+      throw new Error("No cold-start rules available");
+    }
     reasoning.push(`Using default rule: ${matchedRule.name}`);
   }
   

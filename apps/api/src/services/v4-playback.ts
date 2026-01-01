@@ -5,7 +5,7 @@
 
 import { prisma } from "../lib/db";
 import { getEntitlementV4 } from "./v4-entitlements";
-import { getBinauralAsset, getBackgroundAsset, getSolfeggioAsset } from "./audio/assets";
+import { getBinauralAsset, getBackgroundAsset, getSolfeggioAsset, DEFAULT_BACKGROUND_ID } from "./audio/assets";
 import { isSilentModeForced, isBrainTrackFrequencyDisabled, isBackgroundDisabled } from "./v4-kill-switches";
 import type { PlanV4 } from "@ab/contracts";
 
@@ -90,8 +90,8 @@ export async function getPlaybackBundleV4(
   };
 
   // P1-10.2: Check if background is disabled by kill switch
-  const requestedBackgroundId = audioConfig.backgroundId || "default";
-  const backgroundId = isBackgroundDisabled(requestedBackgroundId) ? "default" : requestedBackgroundId;
+  const requestedBackgroundId = audioConfig.backgroundId || DEFAULT_BACKGROUND_ID;
+  const backgroundId = isBackgroundDisabled(requestedBackgroundId) ? DEFAULT_BACKGROUND_ID : requestedBackgroundId;
   
   // Get background asset (always available - bundled)
   const backgroundAsset = await getBackgroundAsset(
@@ -138,6 +138,9 @@ export async function getPlaybackBundleV4(
   // P1-10.2: Check kill switch for forced silent mode
   const forceSilent = isSilentModeForced();
   
+  // Get session (required for AudioEngine and voice URL)
+  const session = plan.playbackSessions?.[0];
+  
   // Get voice track (may not be ready)
   let voiceUrl: string | undefined;
   let fallbackMode: "full" | "voice_pending" | "silent" = "full";
@@ -146,7 +149,6 @@ export async function getPlaybackBundleV4(
     // P1-10.2: Kill switch forces silent mode - skip voice entirely
     fallbackMode = "silent";
   } else {
-    const session = plan.playbackSessions[0];
     if (session?.audio?.mergedAudioAsset?.url) {
       const filePath = session.audio.mergedAudioAsset.url;
       
@@ -185,8 +187,7 @@ export async function getPlaybackBundleV4(
   const estimatedDurationPerAffirmation = 8000; // 8 seconds per affirmation (rough estimate)
   const effectiveAffirmationSpacingMs = estimatedDurationPerAffirmation;
 
-  // Get session ID (required for AudioEngine)
-  // Note: session was already declared above, just verify it exists
+  // Verify session exists (required for AudioEngine)
   if (!session) {
     throw new Error("Plan has no associated session for playback");
   }

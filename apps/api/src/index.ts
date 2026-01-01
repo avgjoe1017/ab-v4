@@ -15,6 +15,12 @@ import { authenticateAdmin, createSessionToken, destroySession, getSession } fro
 import { requireAdminAuth, requireAdminRole, type AdminContext } from "./middleware/admin-auth";
 import { createAuditLog, getAuditLogs } from "./services/admin/audit";
 import {
+  getModerationStats,
+  getFlaggedSessions,
+  moderateAffirmationAction,
+  bulkModerateAffirmations,
+} from "./services/admin/moderation";
+import {
   getAISourceTemplates,
   getAISourceTemplate,
   createAISourceTemplate,
@@ -923,8 +929,13 @@ app.post("/v4/chat/turn", async (c) => {
     const { handleV4Error } = await import("./services/v4-errors");
     const v4Error = handleV4Error(err, "chat_turn");
     
+    // Map V4 error codes to ApiErrorCode
+    const apiErrorCode = (v4Error.code === "NETWORK_ERROR" || v4Error.code === "GENERATION_ERROR")
+      ? v4Error.code as ApiError["code"]
+      : "INTERNAL_ERROR";
+    
     if (v4Error.code === "NETWORK_ERROR" || v4Error.code === "GENERATION_ERROR") {
-      return c.json(error(v4Error.code, v4Error.userMessage, {
+      return c.json(error(apiErrorCode, v4Error.userMessage, {
         recoveryActions: v4Error.recoveryActions,
       }), 500);
     }
@@ -935,7 +946,7 @@ app.post("/v4/chat/turn", async (c) => {
     }
     
     return c.json(
-      error(v4Error.code, v4Error.userMessage, {
+      error(apiErrorCode, v4Error.userMessage, {
         recoveryActions: v4Error.recoveryActions,
       }),
       500
@@ -973,7 +984,7 @@ app.post("/v4/plans/reroll", async (c) => {
     return c.json({
       planDraft: {
         id: updated.id,
-        title: updated.title,
+        title: updated.intentSummary || "Your Plan",
         affirmations,
         rerollsRemaining,
       },
@@ -1109,12 +1120,15 @@ app.get("/v4/plans/:id", async (c) => {
     }
 
     // Get Plan from database
+    const userId = await getUserId(c);
     const plan = await prisma.plan.findUnique({
       where: { id: parsed.data.id },
       include: {
-        saves: {
-          where: { userId: await getUserId(c) },
-        },
+        saves: userId
+          ? {
+              where: { userId },
+            }
+          : true,
       },
     });
 
@@ -1122,7 +1136,6 @@ app.get("/v4/plans/:id", async (c) => {
       return c.json(error("NOT_FOUND", "Plan not found"), 404);
     }
 
-    const userId = await getUserId(c);
     if (plan.userId && plan.userId !== userId) {
       return c.json(error("NOT_FOUND", "Plan not found"), 404);
     }
@@ -1252,8 +1265,9 @@ app.get("/v4/library/premade", async (c) => {
     const results = hasMore ? sessions.slice(0, limit) : sessions;
 
     // Get next cursor (createdAt of the last item)
-    const nextCursor = hasMore && results.length > 0
-      ? results[results.length - 1].createdAt.toISOString()
+    const lastItem = results.length > 0 ? results[results.length - 1] : null;
+    const nextCursor = hasMore && lastItem
+      ? lastItem.createdAt.toISOString()
       : null;
 
     // P1.4.2: Check which plans are saved (if user is authenticated and paid)
@@ -1650,7 +1664,7 @@ app.delete("/v4/me/account", async (c) => {
 
       // Delete plans (user-owned)
       await tx.plan.deleteMany({
-        where: { ownerUserId: userId },
+        where: { userId },
       });
 
       // Delete usage ledger entries
@@ -2917,7 +2931,6 @@ app.post("/admin/moderation/affirmations/bulk", async (c) => {
       adminUserId: admin.adminUserId,
       action: `affirmation.bulk_${action}`,
       resourceType: "SessionAffirmation",
-      resourceId: null,
       details: {
         count: result.count,
         affirmationIds,
@@ -3296,10 +3309,12 @@ if (import.meta.main) {
   );
   
   // Serve /assets/* files (static audio assets)
-  const projectRoot = path.resolve(process.cwd(), "..");
+  // Go up two levels: apps/api -> apps -> project root
+  const projectRoot = path.resolve(process.cwd(), "..", "..");
   const assetsDir = fs.existsSync(path.resolve(projectRoot, "apps", "assets"))
     ? path.resolve(projectRoot, "apps", "assets")
     : path.resolve(projectRoot, "assets");
+  console.log(`[api] Serving assets from: ${assetsDir}`);
   app.on(["GET", "HEAD"], "/assets/*", (c) => 
     serveRangedFile(c, assetsDir, true)
   );

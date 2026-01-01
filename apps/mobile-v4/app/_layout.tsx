@@ -8,6 +8,13 @@ export default function RootLayout() {
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="(tabs)" />
       <Stack.Screen
+        name="player"
+        options={{
+          presentation: 'fullScreenModal',
+          title: 'Player',
+        }}
+      />
+      <Stack.Screen
         name="learn/affirmation-science"
         options={{
           presentation: 'modal',

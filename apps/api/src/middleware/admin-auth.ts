@@ -4,7 +4,11 @@
 
 import type { Context } from "hono";
 import { getSession } from "../services/admin/auth";
-import { error } from "../index";
+import type { ApiError } from "@ab/contracts";
+
+function error(code: ApiError["code"], message: string, details?: unknown): ApiError {
+  return { code, message, details };
+}
 
 export interface AdminContext {
   adminUserId: string;
@@ -50,7 +54,9 @@ export async function requireAdminRole(
     ADMIN: 4,
   };
 
-  if (roleHierarchy[admin.role] < roleHierarchy[requiredRole]) {
+  const adminRoleLevel = roleHierarchy[admin.role] ?? 0;
+  const requiredRoleLevel = roleHierarchy[requiredRole] ?? 0;
+  if (adminRoleLevel < requiredRoleLevel) {
     throw new Error("FORBIDDEN");
   }
 

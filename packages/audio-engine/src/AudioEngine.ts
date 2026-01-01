@@ -124,9 +124,17 @@ export class AudioEngine {
   private binLastPosition: number = 0;
   private bgLastPosition: number = 0;
   
+  // Track failed restart attempts to prevent infinite loops
+  private affFailedRestarts: number = 0;
+  private binFailedRestarts: number = 0;
+  private bgFailedRestarts: number = 0;
+  
   // Debounce threshold: only restart if stopped for this long (ms)
   // This prevents reacting to transient expo-audio state flickers
   private static readonly WATCHDOG_DEBOUNCE_MS = 400;
+  
+  // Max failed restart attempts before giving up (prevents infinite loops)
+  private static readonly MAX_FAILED_RESTARTS = 3;
 
   constructor() {
     console.log("[AudioEngine] BUILD PROOF:", AudioEngine.BUILD_PROOF);
@@ -298,10 +306,42 @@ export class AudioEngine {
         name: string,
         stoppedAt: number,
         lastPosition: number,
+        failedRestarts: number,
         setStoppedAt: (t: number) => void,
-        setLastPosition: (p: number) => void
+        setLastPosition: (p: number) => void,
+        setFailedRestarts: (n: number) => void
       ) => {
-        if (!player || player.duration <= 0) return;
+        if (!player) return;
+        
+        // Skip if duration is invalid (NaN, 0, or negative)
+        // This indicates the player never loaded properly (404, network error, etc.)
+        const playerDuration = player.duration;
+        if (isNaN(playerDuration) || playerDuration <= 0) {
+          // If we've already tried to restart multiple times, give up
+          if (failedRestarts >= AudioEngine.MAX_FAILED_RESTARTS) {
+            // Only log once to avoid spam (log exactly when we hit the limit, not after)
+            if (failedRestarts === AudioEngine.MAX_FAILED_RESTARTS) {
+              console.warn(`[AudioEngine] ⚠️  ${name} failed to load after ${failedRestarts} attempts (duration: ${playerDuration}). Giving up.`);
+              // Increment past the limit so we don't log again
+              setFailedRestarts(failedRestarts + 1);
+            }
+            return;
+          }
+          // If duration is still invalid after a delay, mark as failed
+          if (stoppedAt === 0) {
+            setStoppedAt(now);
+          } else {
+            const waitDuration = now - stoppedAt;
+            // Give it 2 seconds to load before marking as failed
+            if (waitDuration >= 2000) {
+              const newFailedCount = failedRestarts + 1;
+              setFailedRestarts(newFailedCount);
+              console.warn(`[AudioEngine] ⚠️  ${name} still not loaded after ${waitDuration}ms (duration: ${playerDuration}). Failed attempt ${newFailedCount}/${AudioEngine.MAX_FAILED_RESTARTS}`);
+              setStoppedAt(0); // Reset timer
+            }
+          }
+          return;
+        }
         
         // Check buffering state (expo-audio exposes this via status)
         // If buffering, do nothing - this is normal and will resolve
@@ -339,27 +379,57 @@ export class AudioEngine {
         // Check if it's been stopped long enough AND position hasn't advanced (truly stuck)
         const stoppedDuration = now - stoppedAt;
         if (stoppedDuration >= AudioEngine.WATCHDOG_DEBOUNCE_MS && !isAdvancing) {
+          // Check if we've exceeded max failed restart attempts
+          if (failedRestarts >= AudioEngine.MAX_FAILED_RESTARTS) {
+            // Only log once to avoid spam
+            if (failedRestarts === AudioEngine.MAX_FAILED_RESTARTS) {
+              console.warn(`[AudioEngine] ⚠️  ${name} exceeded max restart attempts (${failedRestarts}). Giving up.`);
+            }
+            return;
+          }
+          
           console.warn(`[AudioEngine] ⚠️  ${name} persistently stopped for ${stoppedDuration}ms (pos: ${currentPos.toFixed(2)}s/${duration.toFixed(2)}s, EOF: ${isAtEOF}) - restarting`);
           setStoppedAt(0); // Reset so we don't spam
           setLastPosition(currentPos);
           
+          // Track restart attempt
+          const restartAttempt = failedRestarts + 1;
+          
           // If at EOF, seekTo(0) first (expo-audio doesn't auto-rewind)
           if (isAtEOF) {
             player.seekTo(0).then(() => {
-              player.play().catch(err => {
+              // Wrap play() in Promise to handle potential errors
+              Promise.resolve(player.play()).then(() => {
+                // Success - reset failed count
+                if (failedRestarts > 0) {
+                  setFailedRestarts(0);
+                }
+              }).catch((err: unknown) => {
                 console.error(`[AudioEngine] Error restarting ${name} after EOF seek:`, err);
+                setFailedRestarts(restartAttempt);
               });
-            }).catch(err => {
+            }).catch((err: unknown) => {
               console.error(`[AudioEngine] Error seeking ${name} to 0:`, err);
               // Try play anyway
-              player.play().catch(err2 => {
+              Promise.resolve(player.play()).then(() => {
+                if (failedRestarts > 0) {
+                  setFailedRestarts(0);
+                }
+              }).catch((err2: unknown) => {
                 console.error(`[AudioEngine] Error restarting ${name}:`, err2);
+                setFailedRestarts(restartAttempt);
               });
             });
           } else {
             // Not at EOF - just play
-            player.play().catch(err => {
+            Promise.resolve(player.play()).then(() => {
+              // Success - reset failed count
+              if (failedRestarts > 0) {
+                setFailedRestarts(0);
+              }
+            }).catch((err: unknown) => {
               console.error(`[AudioEngine] Error restarting ${name}:`, err);
+              setFailedRestarts(restartAttempt);
             });
           }
         } else {
@@ -370,25 +440,31 @@ export class AudioEngine {
       
       // Check all three players with debouncing (buffer-aware, EOF-aware)
       checkAndRestartPlayer(
-        this.affPlayer, "Affirmations", this.affStoppedAt, this.affLastPosition,
+        this.affPlayer, "Affirmations", this.affStoppedAt, this.affLastPosition, this.affFailedRestarts,
         (t) => { this.affStoppedAt = t; },
-        (p) => { this.affLastPosition = p; }
+        (p) => { this.affLastPosition = p; },
+        (n) => { this.affFailedRestarts = n; }
       );
       checkAndRestartPlayer(
-        this.binPlayer, "Binaural", this.binStoppedAt, this.binLastPosition,
+        this.binPlayer, "Binaural", this.binStoppedAt, this.binLastPosition, this.binFailedRestarts,
         (t) => { this.binStoppedAt = t; },
-        (p) => { this.binLastPosition = p; }
+        (p) => { this.binLastPosition = p; },
+        (n) => { this.binFailedRestarts = n; }
       );
       checkAndRestartPlayer(
-        this.bgPlayer, "Background", this.bgStoppedAt, this.bgLastPosition,
+        this.bgPlayer, "Background", this.bgStoppedAt, this.bgLastPosition, this.bgFailedRestarts,
         (t) => { this.bgStoppedAt = t; },
-        (p) => { this.bgLastPosition = p; }
+        (p) => { this.bgLastPosition = p; },
+        (n) => { this.bgFailedRestarts = n; }
       );
     } else {
-      // Not playing - reset all stopped timers
+      // Not playing - reset all stopped timers and failed restart counts
       this.affStoppedAt = 0;
       this.binStoppedAt = 0;
       this.bgStoppedAt = 0;
+      this.affFailedRestarts = 0;
+      this.binFailedRestarts = 0;
+      this.bgFailedRestarts = 0;
     }
 
     // DISABLED: Drift correction removed (causes audible gaps)
@@ -451,6 +527,11 @@ export class AudioEngine {
       this.binPlayer?.release();
       this.bgPlayer?.release();
       // Note: We don't release pre-roll here - it continues during load
+      
+      // Reset failed restart counts when loading new bundle
+      this.affFailedRestarts = 0;
+      this.binFailedRestarts = 0;
+      this.bgFailedRestarts = 0;
 
       // V3 Compliance: Platform-aware URL selection
       const getUrl = (asset: { urlByPlatform: { ios: string, android: string } }) => {

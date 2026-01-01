@@ -7,8 +7,8 @@ import { isS3Configured, getS3Config, fileExistsInS3 } from "../storage/s3";
  * V3 Compliance: Resolve binaural and background assets from AudioAsset table or constants.
  * Returns platform-aware URLs for playback bundle.
  * 
- * iOS uses S3 URLs (HTTPS) to avoid App Transport Security issues.
- * Android can use local HTTP URLs.
+ * Always prefers local files for both iOS and Android to avoid buffering/downloading.
+ * Falls back to S3 URLs only if local files don't exist.
  */
 
 // ============================================================================
@@ -77,7 +77,7 @@ const ASSETS_ROOT = fs.existsSync(APPS_ASSETS_ROOT) ? APPS_ASSETS_ROOT : ROOT_AS
 
 // Default binaural/background asset IDs (can be configured per session later)
 const DEFAULT_BINAURAL_HZ = 10; // Alpha 10Hz
-const DEFAULT_BACKGROUND_ID = "Babbling Brook"; // From assets/audio/background/looped/
+export const DEFAULT_BACKGROUND_ID = "Babbling Brook"; // From assets/audio/background/looped/
 
 // S3 URLs for static assets (uploaded via scripts/upload-static-assets-to-s3.ts)
 function getS3AssetUrl(s3Key: string): string | null {
@@ -137,8 +137,8 @@ function getBinauralFilename(hz: number, brainwaveState?: string): string {
  * Get binaural asset URL by frequency (Hz) and brainwave state
  * Returns platform-aware URLs for iOS and Android
  * 
- * iOS: Uses S3 HTTPS URL to avoid App Transport Security issues
- * Android: Uses local HTTP URL (no ATS restrictions)
+ * Always prefers local files to avoid buffering/downloading.
+ * Falls back to S3 URLs only if local files don't exist.
  * 
  * @param hz - Binaural frequency in Hz (default: 10)
  * @param apiBaseUrl - Base URL of the API server (e.g., "http://localhost:8787")
@@ -282,10 +282,10 @@ export async function getBinauralAsset(
         }
     }
     
-    // iOS gets S3 URL (HTTPS) if available, otherwise local URL
-    // Android gets local URL (HTTP)
-    const iosUrl = s3Url || localUrl;
-    const androidUrl = localUrl;
+    // Always prefer local files for both platforms to avoid buffering/downloading
+    // Only fall back to S3 if local file doesn't exist
+    const iosUrl = localUrl || s3Url;
+    const androidUrl = localUrl || s3Url;
     
     return {
         urlByPlatform: { ios: iosUrl, android: androidUrl },
@@ -298,8 +298,8 @@ export async function getBinauralAsset(
  * Get solfeggio asset URL by frequency (Hz)
  * Returns platform-aware URLs for iOS and Android
  * 
- * iOS: Uses S3 HTTPS URL to avoid App Transport Security issues
- * Android: Uses local HTTP URL (no ATS restrictions)
+ * Always prefers local files to avoid buffering/downloading.
+ * Falls back to S3 URLs only if local files don't exist.
  * 
  * @param hz - Solfeggio frequency in Hz (e.g., 528)
  * @param apiBaseUrl - Base URL of the API server (e.g., "http://localhost:8787")
@@ -355,10 +355,10 @@ export async function getSolfeggioAsset(
         }
     }
     
-    // iOS gets S3 URL (HTTPS) if available, otherwise local URL
-    // Android gets local URL (HTTP)
-    const iosUrl = s3Url || localUrl;
-    const androidUrl = localUrl;
+    // Always prefer local files for both platforms to avoid buffering/downloading
+    // Only fall back to S3 if local file doesn't exist
+    const iosUrl = localUrl || s3Url;
+    const androidUrl = localUrl || s3Url;
     
     return {
         urlByPlatform: { ios: iosUrl, android: androidUrl },
@@ -371,8 +371,8 @@ export async function getSolfeggioAsset(
  * Get background asset URL by ID
  * Returns platform-aware URLs for iOS and Android
  * 
- * iOS: Uses S3 HTTPS URL to avoid App Transport Security issues
- * Android: Uses local HTTP URL (no ATS restrictions)
+ * Always prefers local files to avoid buffering/downloading.
+ * Falls back to S3 URLs only if local files don't exist.
  * 
  * @param backgroundId - Background asset ID (default: "Babbling Brook")
  * @param apiBaseUrl - Base URL of the API server (e.g., "http://localhost:8787")
@@ -398,7 +398,7 @@ export async function getBackgroundAsset(
     const assetPath = path.resolve(ASSETS_ROOT, "audio", "background", "looped", `${backgroundId}.m4a`);
     
     // Check if local file exists (for Android URL)
-    let localUrl: string;
+    let localUrl: string | null = null;
     if (await fs.pathExists(assetPath)) {
         const relativePath = path.relative(ASSETS_ROOT, assetPath).replace(/\\/g, "/");
         const basePath = `${ASSETS_PUBLIC_BASE_URL}/${relativePath}`;
@@ -418,14 +418,18 @@ export async function getBackgroundAsset(
               .map(segment => segment ? encodeURIComponent(segment) : segment)
               .join("/");
             localUrl = `${apiBaseUrl}${encodedPath}`;
-        } else {
-            throw new Error(`Background asset not found: ${backgroundId}. Looked in: ${assetPath}`);
         }
     }
     
-    // iOS gets S3 URL (HTTPS), Android gets local URL (HTTP)
-    const iosUrl = s3Url || fallbackS3Url || localUrl;
-    const androidUrl = localUrl;
+    // Always prefer local files for both platforms to avoid buffering/downloading
+    // Only fall back to S3 if local file doesn't exist
+    const iosUrl = localUrl || fallbackS3Url || s3Url;
+    const androidUrl = localUrl || fallbackS3Url || s3Url;
+    
+    // If we have no URLs at all, throw an error
+    if (!iosUrl || !androidUrl) {
+        throw new Error(`Background asset not found: ${backgroundId}. Looked in: ${assetPath}. S3 URLs also unavailable.`);
+    }
     
     return {
         urlByPlatform: { ios: iosUrl, android: androidUrl },

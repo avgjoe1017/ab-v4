@@ -107,7 +107,7 @@ export default function PlayerScreen() {
     const subscription = AppState.addEventListener('change', (nextAppState: AppStateStatus) => {
       if (appState.current.match(/inactive|background/) && nextAppState === 'active') {
         // App came to foreground - refresh snapshot to sync with AudioEngine
-        const currentSnapshot = engine.getSnapshot();
+        const currentSnapshot = engine.getState();
         if (currentSnapshot) {
           setSnapshot(currentSnapshot);
         }
@@ -154,14 +154,14 @@ export default function PlayerScreen() {
       }
     };
 
-    engine.subscribe(listener);
-    const currentSnapshot = engine.getSnapshot();
+    const unsubscribe = engine.subscribe(listener);
+    const currentSnapshot = engine.getState();
     if (currentSnapshot) {
       setSnapshot(currentSnapshot);
     }
 
     return () => {
-      engine.unsubscribe(listener);
+      unsubscribe();
     };
   }, [engine, showEndCard]);
 

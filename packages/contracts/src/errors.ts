@@ -9,7 +9,24 @@ export type ApiErrorCode =
   | "ASSET_ERROR"
   | "INTERNAL_ERROR"
   | "UNAUTHORIZED" // Phase 6.1: Authentication errors
-  | "RATE_LIMITED";
+  | "RATE_LIMITED"
+  | "NETWORK_ERROR"
+  | "GENERATION_ERROR"
+  | "REROLL_LIMIT_REACHED"
+  | "INVALID_PLAN_DRAFT_ID"
+  | "AFFIRMATION_COUNT_NOT_ALLOWED"
+  | "VOICE_NOT_ALLOWED"
+  | "INVALID_PLAN_ID"
+  | "FORBIDDEN"
+  | "PLAYBACK_ERROR"
+  | "INVALID_JOB_ID"
+  | "INVALID_STATE"
+  | "INVALID_USER_ID"
+  | "PLAYBACK_NOT_READY"
+  | "PLAYBACK_NETWORK_ERROR"
+  | "UNKNOWN_ERROR"
+  | "INVALID_ACTION"
+  | "INVALID_INPUT";
 
 export type ApiError = {
   code: ApiErrorCode;

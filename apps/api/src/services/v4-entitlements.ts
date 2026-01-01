@@ -5,14 +5,40 @@
 
 import { getEntitlement } from "./entitlements";
 import { getUsageSummary, hasRemainingDailyPlans, hasRemainingRerolls } from "./v4-usage";
+import { isDevelopment } from "../lib/config";
 import type { EntitlementV4 } from "@ab/contracts";
 
 /**
  * Get V4 entitlements with usage-derived limits
+ * 
+ * NOTE: In development mode, returns unlimited limits for easier testing
  */
 export async function getEntitlementV4(userId: string | null): Promise<EntitlementV4> {
   const v3Ent = await getEntitlement(userId);
   const usage = await getUsageSummary(userId);
+
+  // In development, return unlimited entitlements for easier testing
+  if (isDevelopment()) {
+    return {
+      schemaVersion: 4,
+      plan: v3Ent.plan,
+      status: v3Ent.status,
+      renewsAt: v3Ent.renewsAt,
+      source: v3Ent.source,
+      limits: {
+        dailyPlans: "unlimited",
+        maxSessionDurationMs: "unlimited",
+        affirmationCountsAllowed: [6, 12, 18, 24],
+        canSave: true,
+        voicesAllowed: "all",
+        canPickBrainTrack: true,
+        canPickBackground: true,
+        canWriteOwnAffirmations: true,
+      },
+      canCreatePlan: true,
+      remainingPlansToday: "unlimited",
+    };
+  }
 
   const isFree = v3Ent.plan === "free";
   const dailyPlansLimit = isFree ? 1 : "unlimited";
@@ -50,6 +76,8 @@ export async function getEntitlementV4(userId: string | null): Promise<Entitleme
 /**
  * Enforce entitlement checks before allowing an action
  * Returns error message if action is not allowed, null if allowed
+ * 
+ * NOTE: In development mode, all limits are bypassed for easier testing
  */
 export async function enforceEntitlement(
   userId: string | null,
@@ -61,6 +89,11 @@ export async function enforceEntitlement(
     | { type: "CUSTOM_BACKGROUND" }
     | { type: "CUSTOM_BRAIN_TRACK" }
 ): Promise<string | null> {
+  // Bypass all limits in development mode
+  if (isDevelopment()) {
+    return null;
+  }
+
   const entitlement = await getEntitlementV4(userId);
 
   switch (action.type) {

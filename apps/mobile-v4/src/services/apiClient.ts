@@ -10,7 +10,7 @@ import { Platform } from 'react-native';
 
 // CHANGE THIS to your development machine's IP address
 // This is needed because iOS simulator can't access localhost/127.0.0.1 on the host machine
-const DEV_MACHINE_IP = '192.168.0.114';
+const DEV_MACHINE_IP = '192.168.86.35';
 
 export class ApiClient {
   private baseUrl: string;
@@ -62,10 +62,12 @@ export class ApiClient {
       return response.json();
     } catch (err) {
       // Wrap network errors to preserve error type information
-      // Network errors typically throw TypeError with messages like "Network request failed" or "Failed to fetch"
+      // Network errors typically throw TypeError with messages like "Network request failed", "Failed to fetch", "Network request timed out", etc.
       if (err instanceof TypeError && (
         err.message.includes('Network request failed') ||
         err.message.includes('Failed to fetch') ||
+        err.message.includes('Network request timed out') ||
+        err.message.includes('timed out') ||
         err.message.includes('network')
       )) {
         if (__DEV__) {
@@ -101,10 +103,12 @@ export class ApiClient {
       return response.json();
     } catch (err) {
       // Wrap network errors to preserve error type information
-      // Network errors typically throw TypeError with messages like "Network request failed" or "Failed to fetch"
+      // Network errors typically throw TypeError with messages like "Network request failed", "Failed to fetch", "Network request timed out", etc.
       if (err instanceof TypeError && (
         err.message.includes('Network request failed') ||
         err.message.includes('Failed to fetch') ||
+        err.message.includes('Network request timed out') ||
+        err.message.includes('timed out') ||
         err.message.includes('network')
       )) {
         const networkError = new Error('Network request failed - API server may not be running');
@@ -136,10 +140,12 @@ export class ApiClient {
       return response.json();
     } catch (err) {
       // Wrap network errors to preserve error type information
-      // Network errors typically throw TypeError with messages like "Network request failed" or "Failed to fetch"
+      // Network errors typically throw TypeError with messages like "Network request failed", "Failed to fetch", "Network request timed out", etc.
       if (err instanceof TypeError && (
         err.message.includes('Network request failed') ||
         err.message.includes('Failed to fetch') ||
+        err.message.includes('Network request timed out') ||
+        err.message.includes('timed out') ||
         err.message.includes('network')
       )) {
         const networkError = new Error('Network request failed - API server may not be running');
@@ -170,10 +176,12 @@ export class ApiClient {
       return response.json();
     } catch (err) {
       // Wrap network errors to preserve error type information
-      // Network errors typically throw TypeError with messages like "Network request failed" or "Failed to fetch"
+      // Network errors typically throw TypeError with messages like "Network request failed", "Failed to fetch", "Network request timed out", etc.
       if (err instanceof TypeError && (
         err.message.includes('Network request failed') ||
         err.message.includes('Failed to fetch') ||
+        err.message.includes('Network request timed out') ||
+        err.message.includes('timed out') ||
         err.message.includes('network')
       )) {
         const networkError = new Error('Network request failed - API server may not be running');

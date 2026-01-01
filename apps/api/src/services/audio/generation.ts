@@ -282,7 +282,7 @@ export async function ensureSilence(durationMs: number): Promise<{ hash: string;
         });
 
         if (existingComposed && await fs.pathExists(existingComposed.url)) {
-            return existingComposed.url;
+            return { hash: composedHash, url: existingComposed.url };
         }
 
         // Stitch the chunks
@@ -637,6 +637,8 @@ export async function processEnsureAudioJob(payload: { sessionId: string }) {
         // Record individual affirmation line audio chunks
         for (let i = 0; i < session.affirmations.length; i++) {
             const aff = session.affirmations[i];
+            if (!aff) continue;
+            
             const chunk1 = affirmationChunks[i * 2];
             const chunk2 = affirmationChunks[i * 2 + 1];
             

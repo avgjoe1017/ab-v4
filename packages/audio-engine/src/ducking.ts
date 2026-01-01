@@ -61,6 +61,11 @@ export class VoiceActivityDucker {
         while (this.currentSegmentIndex < this.segments.length) {
             const segment = this.segments[this.currentSegmentIndex];
             
+            // TypeScript safety check (though while condition should guarantee this)
+            if (!segment) {
+                break;
+            }
+            
             // If we're past this segment, move to next
             if (checkPos > segment.endMs) {
                 this.currentSegmentIndex++;

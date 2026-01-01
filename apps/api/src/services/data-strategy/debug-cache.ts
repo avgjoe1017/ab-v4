@@ -17,7 +17,9 @@ const ENCRYPTION_ALGORITHM = "aes-256-gcm";
  */
 function encrypt(payload: string): string {
   const iv = crypto.randomBytes(16);
-  const cipher = crypto.createCipheriv(ENCRYPTION_ALGORITHM, Buffer.from(ENCRYPTION_KEY.padEnd(32, "0").slice(0, 32)), iv);
+  const keyString = ENCRYPTION_KEY.padEnd(32, "0").slice(0, 32);
+  const keyBuffer = Buffer.from(keyString, "utf8");
+  const cipher = crypto.createCipheriv(ENCRYPTION_ALGORITHM, keyBuffer, iv);
   
   let encrypted = cipher.update(payload, "utf8", "hex");
   encrypted += cipher.final("hex");
@@ -38,12 +40,18 @@ function decrypt(encryptedData: string): string {
   }
   
   const [ivHex, authTagHex, encrypted] = parts;
+  if (!ivHex || !authTagHex || !encrypted) {
+    throw new Error("Invalid encrypted data format");
+  }
+  
   const iv = Buffer.from(ivHex, "hex");
   const authTag = Buffer.from(authTagHex, "hex");
   
+  const keyString = ENCRYPTION_KEY.padEnd(32, "0").slice(0, 32);
+  const keyBuffer = Buffer.from(keyString, "utf8");
   const decipher = crypto.createDecipheriv(
     ENCRYPTION_ALGORITHM,
-    Buffer.from(ENCRYPTION_KEY.padEnd(32, "0").slice(0, 32)),
+    keyBuffer,
     iv
   );
   decipher.setAuthTag(authTag);
