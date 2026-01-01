@@ -1,0 +1,595 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  struggle  String?  // Optional: what user is working on (e.g., "I'm dealing with imposter syndrome")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  preferences Preferences?
+  sessions     Session[]
+  entitlementState EntitlementState?
+  entitlementEvents EntitlementEvent[]
+  values         UserValue[]
+  sessionEvents SessionEvent[]
+  curationPreferences CurationPreferences?
+  userPaths UserPath[]
+  chatThreads    ChatThread[]
+  planDrafts     PlanDraft[]
+  plans          Plan[]
+  planSaves      PlanSave[]
+  usageLedger    UsageLedger[]
+  consentLedger  ConsentLedger[]
+  userMemory     UserMemory?
+  debugCache     DebugCache[]
+  memoryDeltas   MemoryDistillationDelta[]
+  intentMappings IntentMapping[]
+  efficacyEvents EfficacyEvent[]
+}
+
+model Preferences {
+  userId       String @id
+  schemaVersion Int
+  json         String
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+}
+
+model Session {
+  id        String   @id @default(uuid())
+  ownerUserId String?
+  source    String   // "catalog" | "user" | "generated"
+  title     String
+  goalTag   String?
+  durationSec Int?
+  voiceId   String
+  pace      String?
+  affirmationSpacingMs Int?
+  affirmationsHash String
+  frequencyHz Float?  // Binaural beat frequency in Hz (e.g., 10.0 for Alpha)
+  brainwaveState String? // "Delta" | "Theta" | "Alpha" | "SMR" | "Beta"
+  solfeggioHz Float?  // Solfeggio frequency in Hz (e.g., 528.0) - alternative to binaural
+  planId    String?  // V4: Link to Plan if created from V4 flow
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  ownerUser User? @relation(fields: [ownerUserId], references: [id], onDelete: SetNull)
+  v4Plan    Plan?  @relation(fields: [planId], references: [id], onDelete: SetNull)
+
+  affirmations SessionAffirmation[]
+  audio        SessionAudio?
+
+  @@index([ownerUserId])
+  @@index([source])
+  @@index([affirmationsHash])
+  @@index([planId])
+}
+
+model SessionAffirmation {
+  id        String @id @default(uuid())
+  sessionId String
+  idx       Int
+  text      String
+  moderationStatus String @default("pending") // "pending" | "approved" | "flagged" | "rejected"
+  moderationReason String? // Reason for flag/reject (e.g., "vulgar", "negative", "racist")
+  moderatedBy String? // Admin user ID who moderated
+  moderatedAt DateTime?
+  originalText String? // Store original if edited
+  autoFlagged Boolean @default(false) // True if flagged by automated moderation
+
+  session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, idx])
+  @@index([sessionId])
+  @@index([moderationStatus])
+  @@index([sessionId, moderationStatus])
+}
+
+model AudioAsset {
+  id        String   @id @default(uuid())
+  kind      String   // "affirmationMerged" | "affirmationChunk" | "silence" | "background" | "binaural"
+  hash      String
+  url       String
+  metaJson  String?
+  createdAt DateTime @default(now())
+
+  @@index([kind])
+  sessionAudios SessionAudio[]
+  sessionAudioAssets SessionAudioAsset[]
+  @@unique([kind, hash])
+}
+
+model SessionAudio {
+  sessionId String @id
+  mergedAudioAssetId String
+  generatedAt DateTime @default(now())
+
+  session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  mergedAudioAsset AudioAsset @relation(fields: [mergedAudioAssetId], references: [id])
+  assets SessionAudioAsset[]
+
+  @@index([mergedAudioAssetId])
+}
+
+model SessionAudioAsset {
+  id        String   @id @default(uuid())
+  sessionId String
+  kind      String   // "affirmation_line" | "affirmation_stitched" | "background" | "binaural" | "mix_preview" | "final_mix"
+  lineIndex Int?     // For affirmation_line, the index of the affirmation
+  storageKey String  // S3 key or local file path
+  audioAssetId String? // Link to AudioAsset if cached
+  durationMs Int?
+  codec     String?  // "aac", "mp3", etc.
+  sampleRate Int?     // e.g., 44100
+  channels  Int?      // 1 = mono, 2 = stereo
+  fileSize  Int?      // bytes
+  checksum  String?   // SHA-256 hash
+  createdAt DateTime @default(now())
+
+  session SessionAudio @relation(fields: [sessionId], references: [sessionId], onDelete: Cascade)
+  audioAsset AudioAsset? @relation(fields: [audioAssetId], references: [id], onDelete: SetNull)
+
+  @@index([sessionId])
+  @@index([sessionId, kind])
+  @@index([sessionId, kind, lineIndex])
+}
+
+model EntitlementState {
+  userId   String @id
+  plan     String
+  status   String
+  renewsAt DateTime?
+  source   String?
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model EntitlementEvent {
+  id        String   @id @default(uuid())
+  userId    String
+  provider  String
+  type      String
+  payloadJson String
+  occurredAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, occurredAt])
+}
+
+model Job {
+  id        String   @id @default(uuid())
+  type      String   // "ensure-audio"
+  status    String   // "pending", "processing", "completed", "failed"
+  payload   String   // JSON
+  result    String?  // JSON
+  error     String?
+  attempts  Int      @default(0)
+  startedAt DateTime?
+  finishedAt DateTime?
+  sessionId String?  // Optional link to session
+  userId    String?  // Optional link to user
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@index([type])
+  @@index([createdAt])
+  @@index([sessionId])
+  @@index([userId])
+}
+
+model UserValue {
+  id        String   @id @default(uuid())
+  userId    String
+  valueId   String   // Value identifier (e.g., "achievement", "connection")
+  valueText String   // Display text (e.g., "Achievement & Success")
+  rank      Int?     // Ranking (1 = highest priority, null = unranked)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([userId, rank])
+}
+
+model AdminUser {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  passwordHash String // bcrypt hash
+  role      String   // "ADMIN" | "OPERATOR" | "SUPPORT" | "READ_ONLY"
+  name      String?
+  isActive  Boolean  @default(true)
+  lastLoginAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  auditLogs AuditLog[]
+
+  @@index([email])
+  @@index([role])
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  adminUserId String
+  action    String   // e.g., "session.delete", "user.update", "job.retry"
+  resourceType String // e.g., "Session", "User", "Job"
+  resourceId String?
+  details   String?  // JSON string with before/after or additional context
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  adminUser AdminUser @relation(fields: [adminUserId], references: [id], onDelete: Cascade)
+
+  @@index([adminUserId])
+  @@index([action])
+  @@index([resourceType, resourceId])
+  @@index([createdAt])
+}
+
+model AISourceVersion {
+  id              String   @id @default(uuid())
+  promptTemplateId String
+  version         Int      // Incrementing version number
+  name            String
+  content         String   // The prompt template content
+  model           String?  // e.g., "gpt-4", "gpt-3.5-turbo"
+  voice           String?  // For TTS prompts
+  cachingPolicy   String?  // "enabled" | "disabled"
+  rolloutPercent  Int      @default(0) // 0-100, percentage of traffic
+  isActive        Boolean  @default(false)
+  isTest          Boolean  @default(false) // Test versions don't affect production
+  createdBy       String?  // Admin user ID
+  createdAt       DateTime @default(now())
+  activatedAt     DateTime?
+
+  promptTemplate AISourcePromptTemplate @relation(fields: [promptTemplateId], references: [id], onDelete: Cascade)
+
+  @@unique([promptTemplateId, version])
+  @@index([promptTemplateId])
+  @@index([promptTemplateId, isActive])
+  @@index([createdAt])
+}
+
+model AISourcePromptTemplate {
+  id        String   @id @default(uuid())
+  name      String   @unique // e.g., "affirmation_generator", "session_title"
+  description String?
+  currentVersion Int @default(1)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  versions AISourceVersion[]
+
+  @@index([name])
+}
+
+// Session event tracking for curation
+model SessionEvent {
+  id        String   @id @default(uuid())
+  userId    String
+  sessionId String
+  eventType String   // "start" | "complete" | "abandon" | "replay" | "skip_affirmation" | "mix_adjust"
+  metadata  String?  // JSON string with event-specific data (abandonTimeSec, mixAdjustments, etc.)
+  occurredAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, occurredAt])
+  @@index([sessionId])
+  @@index([eventType])
+  @@index([userId, eventType, occurredAt])
+}
+
+// User curation preferences (progressive profiling)
+model CurationPreferences {
+  userId       String @id
+  primaryGoal  String? // "Calm" | "Focus" | "Sleep" | "Confidence" | "Reset"
+  voicePreference String? // "More space" | "Balanced" | "More guidance"
+  soundPreference String? // "Voice-forward" | "Balanced" | "Atmosphere-forward"
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// Path/chapter progression system
+model UserPath {
+  id        String   @id @default(uuid())
+  userId    String
+  pathId    String   // e.g., "imposter_to_impact"
+  pathName  String   // e.g., "Imposter to Impact"
+  stepIndex Int      @default(0) // Current chapter (0-based)
+  totalSteps Int     // Total chapters in path
+  lastCompletedAt DateTime?
+  lastActionDone Boolean @default(false)
+  selfRating Int?    // Optional 1-5 rating
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, pathId])
+  @@index([userId, isActive])
+}
+
+// ===== V4 MODELS =====
+
+// V4: Chat threads for conversation history
+model ChatThread {
+  id            String   @id @default(uuid())
+  userId        String?
+  clientDeviceId String?  // Optional: for anonymous users
+  status        String   @default("active") // "active" | "archived" | "deleted"
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user          User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages      ChatMessage[]
+  planDrafts    PlanDraft[]
+
+  @@index([userId])
+  @@index([userId, status])
+  @@index([createdAt])
+}
+
+// V4: Chat messages within threads
+model ChatMessage {
+  id          String   @id @default(uuid())
+  threadId    String
+  role        String   // "user" | "assistant" | "system"
+  content     String   // Text content
+  safetyFlags String?  // JSON: riskLevel, moderation flags, etc.
+  createdAt   DateTime @default(now())
+
+  thread      ChatThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+
+  @@index([threadId])
+  @@index([threadId, createdAt])
+}
+
+// V4: Plan drafts (pre-commit state, server-owned)
+model PlanDraft {
+  id              String   @id @default(uuid())
+  userId          String?
+  threadId        String?
+  state           String   @default("collecting") // "collecting" | "ready" | "committed" | "abandoned"
+  intentSummary   String?  // Short summary of user intent
+  affirmationCount Int      @default(6)
+  affirmations    String   // JSON array of affirmation texts
+  voiceMode       String   @default("male") // "male" | "female" | voiceId
+  brainTrackMode  String   @default("default") // "default" | "binaural" | "solfeggio"
+  brainTrackId    String?  // Hz value or preset ID
+  backgroundId    String?  // Background audio asset ID
+  rerollCount     Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user            User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  thread          ChatThread? @relation(fields: [threadId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([threadId])
+  @@index([userId, state])
+  @@index([createdAt])
+}
+
+// V4: Committed plans (after user taps Start Session)
+model Plan {
+  id              String   @id @default(uuid())
+  userId          String?
+  source          String   // "generated" | "premade" | "saved"
+  sourceDraftId   String?  // P0 GAP FIX: Link to PlanDraft for idempotent commits (prevents duplicate commits)
+  title           String
+  intentSummary   String?
+  affirmationCount Int
+  affirmations    String   // JSON array
+  voiceConfig     String   // JSON: voiceId, pace, etc.
+  audioConfig     String   // JSON: brainTrack, background, mix, etc.
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user            User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  saves           PlanSave[]
+  playbackSessions Session[]  // Link to Session for audio playback (backward compat)
+
+  @@unique([sourceDraftId]) // P0 GAP FIX: Prevent duplicate commits of same draft
+  @@index([userId])
+  @@index([source])
+  @@index([userId, source])
+  @@index([createdAt])
+}
+
+// V4: Plan saves (paid feature)
+model PlanSave {
+  id        String   @id @default(uuid())
+  userId    String
+  planId    String
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan      Plan     @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, planId])
+  @@index([userId])
+  @@index([planId])
+}
+
+// V4: Usage ledger (truth source for quotas)
+model UsageLedger {
+  id        String   @id @default(uuid())
+  userId    String?
+  dateKey   String   // YYYY-MM-DD in user timezone (or default)
+  eventType String   // "PLAN_COMMIT" | "REROLL" | "SAVE_ATTEMPT" | "PLAY_START"
+  refId     String?  // planDraftId or planId (no FK - can reference different table types)
+  metadata  String?  // JSON: additional context
+  createdAt DateTime @default(now())
+
+  user      User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, dateKey])
+  @@index([userId, dateKey, eventType])
+  @@index([dateKey])
+  @@index([refId])
+  @@index([createdAt])
+}
+
+// ===== DATA STRATEGY MODELS =====
+
+// Consent Ledger: Versioned consent tracking with copy IDs (DATA_STRATEGY.md Section 3.2)
+model ConsentLedger {
+  id              String   @id @default(uuid())
+  userId          String
+  toggleName      String   // "personalize_experience" | "improve_product" | "share_insights" | "allow_research_samples"
+  toggleValue     Boolean  // true = consented, false = revoked
+  consentCopyId   String   // ID of exact copy shown to user (source of truth)
+  consentVersionId String? // Optional version ID
+  appVersion      String?  // App version when consent was given
+  locale          String?  // User locale
+  timezoneOffsetMinutes Int? // Timezone offset
+  createdAt       DateTime @default(now())
+
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([userId, toggleName])
+  @@index([userId, createdAt])
+  @@index([consentCopyId])
+}
+
+// User Memory: Structured per-user memory with distillation (DATA_STRATEGY.md Section 2.2)
+model UserMemory {
+  userId          String   @id
+  memoryJson      String   // JSON: structured memory object
+  lastDistilledAt DateTime @default(now())
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// Memory Distillation Delta: Updates to user memory (DATA_STRATEGY.md Section 2.2)
+model MemoryDistillationDelta {
+  id              String   @id @default(uuid())
+  userId          String
+  deltaJson       String   // JSON: memory update delta
+  sourceEvent     String?  // Event that triggered this delta (e.g., "plan_committed", "feedback_given")
+  sourceEventId   String?  // ID of source event
+  createdAt       DateTime @default(now())
+
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([userId, createdAt])
+  @@index([sourceEvent, sourceEventId])
+}
+
+// Debug Cache: Encrypted short-TTL cache for debugging (DATA_STRATEGY.md Section 5.2)
+model DebugCache {
+  id              String   @id @default(uuid())
+  userId          String?
+  cacheKey        String   // Unique cache key
+  encryptedPayload String  // Encrypted JSON payload
+  ttlHours        Int      @default(24) // Time to live in hours
+  expiresAt       DateTime // Calculated: createdAt + ttlHours
+  readCount       Int      @default(0) // Track reads for audit
+  lastReadAt      DateTime?
+  createdAt       DateTime @default(now())
+
+  user            User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([cacheKey])
+  @@index([userId])
+  @@index([expiresAt])
+  @@index([createdAt])
+}
+
+// Intent Ontology: Hierarchical taxonomy of affirmation intents (DATA_STRATEGY.md Section 2.1)
+model IntentTaxonomyNode {
+  id              String   @id @default(uuid())
+  version         Int      @default(1) // Ontology version
+  nodeId          String   // Unique node identifier (e.g., "confidence.work")
+  parentNodeId    String?  // Parent node ID (null for root)
+  label           String   // Human-readable label
+  description     String?  // Description
+  sensitivityTier String   @default("low") // "low" | "medium" | "high" | "crisis"
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  parent          IntentTaxonomyNode? @relation("IntentTaxonomyEdges", fields: [parentNodeId], references: [id], onDelete: SetNull)
+  children        IntentTaxonomyNode[] @relation("IntentTaxonomyEdges")
+  intentMappings  IntentMapping[]
+  efficacyEvents  EfficacyEvent[]
+
+  @@unique([version, nodeId])
+  @@index([version])
+  @@index([nodeId])
+  @@index([parentNodeId])
+  @@index([sensitivityTier])
+}
+
+// Intent Mapping: Maps user signals to intent taxonomy nodes (DATA_STRATEGY.md Section 2.1)
+model IntentMapping {
+  id              String   @id @default(uuid())
+  userId          String?
+  threadId        String?  // Chat thread ID
+  planId          String?  // Plan ID
+  topicId         String   // Intent taxonomy node ID
+  confidence      Float    // Confidence score 0-1
+  mapperVersion   String   // Version of intent mapper used
+  signals         String?  // JSON: signals used for mapping
+  createdAt       DateTime @default(now())
+
+  user            User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  taxonomyNode    IntentTaxonomyNode @relation(fields: [topicId], references: [id], onDelete: Restrict)
+
+  @@index([userId])
+  @@index([topicId])
+  @@index([threadId])
+  @@index([planId])
+  @@index([createdAt])
+}
+
+// Efficacy Event: Outcomes tracking for efficacy map (DATA_STRATEGY.md Section 2.3)
+model EfficacyEvent {
+  id                  String   @id @default(uuid())
+  userId              String?
+  planId              String?  // Plan ID
+  sessionId           String?  // Session ID
+  topicId             String   // Intent taxonomy node ID
+  toneClass           String?  // "calm" | "energetic" | "grounded" | etc.
+  intensityBand       String?  // "low" | "medium" | "high"
+  promptVersion       String?  // Prompt version used
+  generationStrategy  String?  // Generation strategy used
+  outcomeType         String   // "completion" | "replay" | "felt_true" | "edit_distance" | "abandon"
+  outcomeValue        Float?   // Outcome value (e.g., completion=1.0, felt_true=4.5/5, edit_distance=0.2)
+  reasonCode          String?  // Reason code for outcome
+  occurredAt          DateTime @default(now())
+
+  user                User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  taxonomyNode        IntentTaxonomyNode @relation(fields: [topicId], references: [id], onDelete: Restrict)
+
+  @@index([userId])
+  @@index([topicId])
+  @@index([topicId, toneClass, intensityBand])
+  @@index([outcomeType])
+  @@index([occurredAt])
+  @@index([promptVersion, generationStrategy])
+}

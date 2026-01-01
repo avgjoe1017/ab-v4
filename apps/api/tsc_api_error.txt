@@ -1,0 +1,13 @@
+src/index.ts(4,10): error TS2305: Module '"@prisma/client"' has no exported member 'PrismaClient'.
+src/index.ts(50,22): error TS2304: Cannot find name 'DraftSessionSchema'.
+src/index.ts(53,25): error TS2345: Argument of type '"INVALID_INPUT"' is not assignable to parameter of type 'ApiErrorCode'.
+src/index.ts(61,25): error TS2345: Argument of type '"QUOTA_EXCEEDED"' is not assignable to parameter of type 'ApiErrorCode'.
+src/index.ts(65,25): error TS2345: Argument of type '"LIMIT_EXCEEDED"' is not assignable to parameter of type 'ApiErrorCode'.
+src/index.ts(96,21): error TS2304: Cannot find name 'SessionV3Schema'.
+src/index.ts(104,44): error TS7006: Parameter 'a' implicitly has an 'any' type.
+src/index.ts(120,8): error TS2304: Cannot find name 's'.
+src/index.ts(121,28): error TS2304: Cannot find name 's'.
+src/services/audio/generation.ts(5,10): error TS2305: Module '"@prisma/client"' has no exported member 'PrismaClient'.
+src/services/entitlements.ts(1,10): error TS2305: Module '"@prisma/client"' has no exported member 'PrismaClient'.
+src/services/jobs.ts(1,10): error TS2305: Module '"@prisma/client"' has no exported member 'PrismaClient'.
+src/services/jobs.ts(1,24): error TS2305: Module '"@prisma/client"' has no exported member 'Job'.

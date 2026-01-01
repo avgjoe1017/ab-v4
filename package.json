@@ -1,0 +1,20 @@
+{
+  "name": "ab-v4",
+  "private": true,
+  "packageManager": "pnpm@9.12.3",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "pnpm -r dev",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck",
+    "format": "pnpm -r format"
+  },
+  "pnpm": {
+    "overrides": {
+      "react-native-worklets": "0.5.1"
+    }
+  }
+}
