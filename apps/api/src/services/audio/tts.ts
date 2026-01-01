@@ -217,9 +217,10 @@ async function generateElevenLabsTTSWithTimestamps(
   // Lower similarity_boost = softer, more relaxed tone
   // These settings create a calming, ASMR-like quality with slower pacing
   // Reduced stability further for even slower, more meditative delivery
+  // Very low stability (0.15-0.2) creates slower, more deliberate speech
   // Variant 1: Slightly more stable for consistency
   // Variant 2: Slightly less stable for natural prosody variation
-  const stability = options.variant === 1 ? 0.25 : 0.2;
+  const stability = options.variant === 1 ? 0.15 : 0.12; // Much lower for slower, meditative pace
   const similarityBoost = options.variant === 1 ? 0.5 : 0.45;
 
   // Use the "with-timestamps" endpoint to get word-level timing
@@ -241,6 +242,9 @@ async function generateElevenLabsTTSWithTimestamps(
           style: 0.0, // Neutral style for calm affirmations
           use_speaker_boost: false,
         },
+        // Speed control: 0.7-1.2 range, lower = slower (meditative)
+        // 0.7 = 30% slower for truly meditative, calming pace
+        speed: 0.7,
       }),
     }
   );
@@ -266,11 +270,9 @@ async function generateElevenLabsTTSWithTimestamps(
   const audioBuffer = Buffer.from(data.audio_base64, 'base64');
   await fs.writeFile(outputPath, audioBuffer);
 
-  // Convert to MP3 with FFmpeg
-  await convertToMP3(outputPath);
-  
   // Extract voice activity segments from character timing
   // Group contiguous speech into segments (gaps > 150ms = new segment)
+  // Timestamps are already at the correct speed since ElevenLabs generates at 0.7x speed
   const timestamps = extractVoiceActivityFromAlignment(data.alignment);
   
   // Get total duration from the last character end time
@@ -278,6 +280,9 @@ async function generateElevenLabsTTSWithTimestamps(
   const durationMs = charEndTimes.length > 0 
     ? Math.round(charEndTimes[charEndTimes.length - 1]! * 1000)
     : await getAudioDurationMs(outputPath);
+  
+  // Convert to MP3 with FFmpeg (no speed adjustment - already slow from ElevenLabs)
+  await convertToMP3(outputPath);
 
   console.log(`[TTS] Extracted ${timestamps.length} voice activity segments from ElevenLabs timestamps`);
   
@@ -379,6 +384,9 @@ async function generateElevenLabsTTSFallback(
           style: 0.0,
           use_speaker_boost: false,
         },
+        // Speed control: 0.7-1.2 range, lower = slower (meditative)
+        // 0.7 = 30% slower for truly meditative, calming pace
+        speed: 0.7,
       }),
     }
   );

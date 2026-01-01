@@ -1,23 +1,26 @@
-import { AvoidKeyboard } from '@/ui/components/avoid-keyboard';
 import { View } from '@/ui/components/view';
 import { useColor } from '@/ui/hooks/useColor';
 import { ChatBubble } from './components/ChatBubble';
 import { ChatComposer } from './components/ChatComposer';
 import { ChatEmptyState } from './components/ChatEmptyState';
 import { ChatHeader } from './components/ChatHeader';
+import { SideMenu } from './components/SideMenu';
 import { ChatMessage, ChatTurnState, PlanPreview } from './types';
 import { processChatTurn } from './api/chatApi';
 import { PlanPreviewCard } from '../plan/components/PlanPreviewCard';
 import { EditPlanModal } from '../plan/components/EditPlanModal';
 import { apiClient } from '@/services/apiClient';
 import type { EntitlementV4 } from '@ab/contracts';
-import { FlatList, Keyboard, SafeAreaView, TextInput, ActivityIndicator } from 'react-native';
+import { FlatList, Keyboard, SafeAreaView, TextInput, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import React, { useMemo, useRef, useState, useEffect } from 'react';
-import { useRouter } from 'expo-router';
+import { useRouter, usePathname } from 'expo-router';
 
 export default function HomeChatScreen() {
   const background = useColor('background');
   const router = useRouter();
+  const pathname = usePathname();
+  const insets = useSafeAreaInsets();
 
   const inputRef = useRef<TextInput>(null);
 
@@ -30,6 +33,9 @@ export default function HomeChatScreen() {
   const [showEditModal, setShowEditModal] = useState(false);
   const [isCommitting, setIsCommitting] = useState(false);
   const [hasSavedPlans, setHasSavedPlans] = useState(false);
+  const [regenerateCount, setRegenerateCount] = useState(0);
+  const [showSideMenu, setShowSideMenu] = useState(false);
+  const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
 
   // Fetch entitlements
   useEffect(() => {
@@ -68,6 +74,21 @@ export default function HomeChatScreen() {
     };
 
     fetchEntitlements();
+  }, []);
+
+  // Track keyboard visibility
+  useEffect(() => {
+    const showSubscription = Keyboard.addListener('keyboardDidShow', () => {
+      setIsKeyboardVisible(true);
+    });
+    const hideSubscription = Keyboard.addListener('keyboardDidHide', () => {
+      setIsKeyboardVisible(false);
+    });
+
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
+    };
   }, []);
 
   // P1-7.2: Check if user has saved plans for "same vibe as yesterday"
@@ -144,12 +165,21 @@ export default function HomeChatScreen() {
         text: msg.text,
       }));
 
-      setTurnState((prev) => ({
-        ...prev,
-        messages: [...prev.messages, ...assistantMessages],
-        planPreview: response.planPreview,
-        suggestedChips: response.suggestedChips,
-      }));
+      setTurnState((prev) => {
+        // Reset regenerateCount when a new plan preview arrives (new planDraftId)
+        const newPlanDraftId = response.planPreview?.planDraftId;
+        const prevPlanDraftId = prev.planPreview?.planDraftId;
+        if (newPlanDraftId && newPlanDraftId !== prevPlanDraftId) {
+          setRegenerateCount(0);
+        }
+        
+        return {
+          ...prev,
+          messages: [...prev.messages, ...assistantMessages],
+          planPreview: response.planPreview,
+          suggestedChips: response.suggestedChips,
+        };
+      });
     } catch (error) {
       // Check if it's a network error
       const isNetworkError = (error as any)?.isNetworkError === true;
@@ -271,10 +301,75 @@ export default function HomeChatScreen() {
   };
 
   const handleRegeneratePlan = async () => {
-    if (!turnState.planPreview) return;
+    if (!turnState.planPreview?.planDraftId) return;
     
-    // TODO: Call regenerate API
-    console.log('Regenerate plan:', turnState.planPreview);
+    try {
+      const response = await apiClient.post<{
+        planDraft: {
+          id: string;
+          title: string;
+          affirmations: string[];
+          rerollsRemaining: boolean | 'unlimited';
+        };
+      }>('/v4/plans/reroll', {
+        planDraftId: turnState.planPreview.planDraftId,
+      });
+      
+      // Update plan preview with new affirmations
+      setTurnState((prev) => ({
+        ...prev,
+        planPreview: prev.planPreview
+          ? {
+              ...prev.planPreview,
+              affirmations: response.planDraft.affirmations,
+              title: response.planDraft.title,
+            }
+          : undefined,
+      }));
+      
+      // Increment regenerate count
+      setRegenerateCount((prev) => prev + 1);
+    } catch (err: any) {
+      console.error('[HomeChatScreen] Regenerate failed:', err);
+      
+      // Handle specific error cases
+      if (err?.status === 403 || err?.error?.code === 'REROLL_LIMIT_REACHED') {
+        // Reroll limit reached - show helpful message with upgrade option
+        const limitMsg: ChatMessage = {
+          id: String(Date.now()) + '-limit',
+          role: 'assistant',
+          text: "You've reached your regeneration limit for this plan. Upgrade to Pro for unlimited regenerations!",
+        };
+        setTurnState((prev) => ({
+          ...prev,
+          messages: [...prev.messages, limitMsg],
+        }));
+        // Optionally navigate to settings
+        // router.push('/settings');
+      } else if ((err as any)?.isNetworkError) {
+        // Network error
+        const networkMsg: ChatMessage = {
+          id: String(Date.now()) + '-network',
+          role: 'assistant',
+          text: "Can't reach the server right now. Please check your connection and try again.",
+        };
+        setTurnState((prev) => ({
+          ...prev,
+          messages: [...prev.messages, networkMsg],
+        }));
+      } else {
+        // Generic error
+        const errorMsg: ChatMessage = {
+          id: String(Date.now()) + '-error',
+          role: 'assistant',
+          text: 'Failed to regenerate plan. Please try again.',
+        };
+        setTurnState((prev) => ({
+          ...prev,
+          messages: [...prev.messages, errorMsg],
+        }));
+      }
+    }
   };
 
   // P1-7.2: Handle "same vibe as yesterday" shortcut
@@ -343,7 +438,7 @@ export default function HomeChatScreen() {
             onStartSession={handleStartSession}
             onEdit={handleEditPlan}
             onRegenerate={handleRegeneratePlan}
-            regenerateCount={0} // TODO: Track regenerate count
+            regenerateCount={regenerateCount}
             isCommitting={isCommitting}
           />
         )}
@@ -351,47 +446,77 @@ export default function HomeChatScreen() {
     );
   };
 
+  const handleMenuPress = () => {
+    setShowSideMenu(true);
+  };
+
+  const handleNavigateToChat = () => {
+    router.push('/(tabs)/(home)');
+  };
+
+  const handleNavigateToLibrary = () => {
+    router.push('/(tabs)/library');
+  };
+
+  const currentRoute = pathname?.includes('library') ? 'library' : 'chat';
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: background }}>
-      <ChatHeader onNewChatPress={handleNewChat} />
-
-      <View style={{ flex: 1 }}>
-        {showEmptyState ? (
-          <ChatEmptyState onSuggestionPress={handleSuggestionPress} />
-        ) : (
-          <>
-            <FlatList
-              data={listData}
-              inverted
-              keyExtractor={(item) => item.id}
-              renderItem={renderListItem}
-              keyboardDismissMode="on-drag"
-              contentContainerStyle={{ paddingTop: 10, paddingBottom: 10 }}
-            />
-            {isLoading && (
-              <View style={{ padding: 16, alignItems: 'center' }}>
-                <ActivityIndicator size="small" />
-              </View>
-            )}
-          </>
-        )}
-      </View>
-
-      <ChatComposer
-        value={composerText}
-        onChangeText={setComposerText}
-        onSend={() => send()}
-        inputRef={inputRef}
-        disabled={isLoading}
-        onChipPress={(text) => {
-          // P1-7.1: Chips send a chat turn (don't bypass flow)
-          send(text);
-        }}
-        showChips={showEmptyState || turnState.messages.length === 0}
-        showSameVibe={hasSavedPlans}
-        onSameVibePress={handleSameVibe}
+      <ChatHeader onMenuPress={handleMenuPress} />
+      
+      <SideMenu
+        visible={showSideMenu}
+        onClose={() => setShowSideMenu(false)}
+        onNavigateToChat={handleNavigateToChat}
+        onNavigateToLibrary={handleNavigateToLibrary}
+        currentRoute={currentRoute}
       />
-      <AvoidKeyboard offset={0} duration={0} />
+
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={{ flex: 1 }}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+      >
+        <View style={{ flex: 1 }}>
+          {showEmptyState ? (
+            <ChatEmptyState onSuggestionPress={handleSuggestionPress} />
+          ) : (
+            <>
+              <FlatList
+                data={listData}
+                inverted
+                keyExtractor={(item) => item.id}
+                renderItem={renderListItem}
+                keyboardDismissMode="on-drag"
+                contentContainerStyle={{ 
+                  paddingTop: 10,
+                  paddingBottom: 10,
+                }}
+              />
+              {isLoading && (
+                <View style={{ padding: 16, alignItems: 'center' }}>
+                  <ActivityIndicator size="small" />
+                </View>
+              )}
+            </>
+          )}
+        </View>
+
+        <View
+          style={{
+            paddingBottom: isKeyboardVisible ? 0 : insets.bottom,
+            backgroundColor: background,
+          }}
+        >
+          <ChatComposer
+            value={composerText}
+            onChangeText={setComposerText}
+            onSend={() => send()}
+            inputRef={inputRef}
+            disabled={isLoading}
+          />
+        </View>
+      </KeyboardAvoidingView>
 
       {/* Edit Plan Modal */}
       {turnState.planPreview && (

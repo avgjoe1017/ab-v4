@@ -8,8 +8,8 @@ import { Text } from '@/ui/components/text';
 import { View } from '@/ui/components/view';
 import { useColor } from '@/ui/hooks/useColor';
 import { SafeAreaView, ScrollView, ActivityIndicator, Pressable, RefreshControl } from 'react-native';
-import { router } from 'expo-router';
-import { BookOpen, ChevronRight, Star } from 'lucide-react-native';
+import { router, usePathname } from 'expo-router';
+import { BookOpen, ChevronRight, Star, Menu, Settings } from 'lucide-react-native';
 import { Icon } from '@/ui/components/icon';
 import React, { useEffect, useState } from 'react';
 import { fetchPremadePlans, fetchSavedPlans, savePlan, unsavePlan } from './api/libraryApi';
@@ -17,6 +17,7 @@ import { PlanCard } from './components/PlanCard';
 import type { PlanV4 } from '@ab/contracts';
 import { apiClient } from '@/services/apiClient';
 import type { EntitlementV4 } from '@ab/contracts';
+import { SideMenu } from '@/features/chat/components/SideMenu';
 import { PaywallModal } from '@/features/shared/components/PaywallModal';
 
 export default function LibraryScreen() {
@@ -26,6 +27,7 @@ export default function LibraryScreen() {
   const border = useColor('border');
   const card = useColor('card');
   const primary = useColor('primary');
+  const pathname = usePathname();
 
   const [premadePlans, setPremadePlans] = useState<PlanV4[]>([]);
   const [premadeCursor, setPremadeCursor] = useState<string | null>(null);
@@ -38,6 +40,7 @@ export default function LibraryScreen() {
   const [error, setError] = useState<string | null>(null);
   const [isOffline, setIsOffline] = useState(false);
   const [showPaywall, setShowPaywall] = useState(false);
+  const [showSideMenu, setShowSideMenu] = useState(false);
 
   const canSave = entitlement?.limits.canSave ?? false;
 
@@ -190,6 +193,24 @@ export default function LibraryScreen() {
     });
   };
 
+  const handleMenuPress = () => {
+    setShowSideMenu(true);
+  };
+
+  const handleNavigateToChat = () => {
+    router.push('/(tabs)/(home)');
+  };
+
+  const handleNavigateToLibrary = () => {
+    router.push('/(tabs)/library');
+  };
+
+  const handleSettingsPress = () => {
+    router.push('/settings');
+  };
+
+  const currentRoute = pathname?.includes('library') ? 'library' : 'chat';
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: background }}>
       <View style={{ flex: 1 }}>
@@ -201,12 +222,37 @@ export default function LibraryScreen() {
             paddingBottom: 12,
             borderBottomWidth: 1,
             borderBottomColor: border,
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'space-between',
           }}
         >
-          <Text variant="heading" style={{ color: text }}>
+          <Pressable
+            accessibilityRole="button"
+            onPress={handleMenuPress}
+            style={{ width: 32, height: 32, alignItems: 'center', justifyContent: 'center' }}
+          >
+            <Icon name={Menu} size={24} color={text} />
+          </Pressable>
+          <Text variant="heading" style={{ color: text, flex: 1, textAlign: 'center' }}>
             Library
           </Text>
+          <Pressable
+            accessibilityRole="button"
+            onPress={handleSettingsPress}
+            style={{ width: 32, height: 32, alignItems: 'center', justifyContent: 'center' }}
+          >
+            <Icon name={Settings} size={24} color={text} />
+          </Pressable>
         </View>
+        
+        <SideMenu
+          visible={showSideMenu}
+          onClose={() => setShowSideMenu(false)}
+          onNavigateToChat={handleNavigateToChat}
+          onNavigateToLibrary={handleNavigateToLibrary}
+          currentRoute={currentRoute}
+        />
 
         <ScrollView
           style={{ flex: 1 }}
@@ -324,7 +370,7 @@ export default function LibraryScreen() {
                   Upgrade anytime to save your favorite plans for easy access
                 </Text>
                 <Pressable
-                  onPress={() => router.push('/(tabs)/settings')}
+                  onPress={() => router.push('/settings')}
                   style={{
                     paddingVertical: 10,
                     paddingHorizontal: 20,
@@ -479,7 +525,7 @@ export default function LibraryScreen() {
         onDismiss={() => setShowPaywall(false)}
         onUpgrade={() => {
           setShowPaywall(false);
-          router.push('/(tabs)/settings');
+          router.push('/settings');
         }}
         title="Save your favorite plans"
         message="Upgrade to save plans and access them anytime."

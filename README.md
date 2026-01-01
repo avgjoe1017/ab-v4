@@ -64,7 +64,7 @@ The API will run on `http://localhost:8787`
 ### Run Mobile V4 (dev)
 ```bash
 # In a NEW terminal (API server should still be running)
-pnpm -C apps/mobile-v4 start
+pnpm -C apps/mobile-v4 start --reset-cache
 ```
 
 Then:

@@ -16,7 +16,6 @@ export function ChatEmptyState({ onSuggestionPress }: ChatEmptyStateProps) {
   const text = useColor('text');
   const mutedText = useColor('textMuted');
   const primary = useColor('primary');
-
   return (
     <View style={{ flex: 1, justifyContent: 'flex-end' }}>
       <View style={{ alignItems: 'center', paddingTop: 84, paddingBottom: 10 }}>

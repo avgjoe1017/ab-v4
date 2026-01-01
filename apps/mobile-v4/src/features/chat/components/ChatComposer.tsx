@@ -1,9 +1,8 @@
 import { Icon } from '@/ui/components/icon';
 import { View } from '@/ui/components/view';
-import { Text } from '@/ui/components/text';
 import { useColor } from '@/ui/hooks/useColor';
 import { Mic, Plus, SendHorizontal } from 'lucide-react-native';
-import { Pressable, TextInput, ViewStyle } from 'react-native';
+import { Pressable, TextInput } from 'react-native';
 import React, { RefObject } from 'react';
 
 interface ChatComposerProps {
@@ -12,18 +11,7 @@ interface ChatComposerProps {
   onSend: () => void;
   inputRef?: RefObject<TextInput>;
   disabled?: boolean;
-  onChipPress?: (text: string) => void; // P1-7.1: Chip press handler
-  showChips?: boolean; // P1-7.1: Show chips below input
-  showSameVibe?: boolean; // P1-7.2: Show "same vibe as yesterday" chip
-  onSameVibePress?: () => void; // P1-7.2: Same vibe handler
 }
-
-// P1-7.1: HomeChat chips - lightweight, gentle suggestions
-const CHIPS = [
-  { id: 'sleep', text: 'Help me sleep' },
-  { id: 'quiet', text: 'Quiet my mind' },
-  { id: 'confidence', text: 'Confidence at work' },
-];
 
 export function ChatComposer({
   value,
@@ -31,10 +19,6 @@ export function ChatComposer({
   onSend,
   inputRef,
   disabled = false,
-  onChipPress,
-  showChips = false,
-  showSameVibe = false,
-  onSameVibePress,
 }: ChatComposerProps) {
   const background = useColor('background');
   const text = useColor('text');
@@ -145,77 +129,6 @@ export function ChatComposer({
           <Icon name={SendHorizontal} size={18} color={background} />
         </Pressable>
       </View>
-
-      {/* P1-7.1 & P1-7.2: HomeChat Chips - lightweight suggestions below input */}
-      {(showChips || showSameVibe) && (
-        <View
-          style={{
-            flexDirection: 'row',
-            gap: 8,
-            marginTop: 8,
-            flexWrap: 'wrap',
-          }}
-        >
-          {/* P1-7.2: "Same vibe as yesterday" chip (shown first if available) */}
-          {showSameVibe && onSameVibePress && (
-            <Pressable
-              onPress={onSameVibePress}
-              disabled={disabled}
-              style={({ pressed }) => [
-                {
-                  paddingVertical: 6,
-                  paddingHorizontal: 12,
-                  borderRadius: 16,
-                  borderWidth: 1,
-                  borderColor: primary,
-                  backgroundColor: primary + '10',
-                  opacity: (pressed || disabled) ? 0.6 : 1,
-                } as ViewStyle,
-              ]}
-            >
-              <Text
-                style={{
-                  fontSize: 14,
-                  color: primary,
-                  fontWeight: '500',
-                }}
-              >
-                {SAME_VIBE_CHIP.text}
-              </Text>
-            </Pressable>
-          )}
-          
-          {/* P1-7.1: Regular chips */}
-          {showChips && onChipPress && CHIPS.map((chip) => (
-            <Pressable
-              key={chip.id}
-              onPress={() => onChipPress(chip.text)}
-              disabled={disabled}
-              style={({ pressed }) => [
-                {
-                  paddingVertical: 6,
-                  paddingHorizontal: 12,
-                  borderRadius: 16,
-                  borderWidth: 1,
-                  borderColor: border,
-                  backgroundColor: 'transparent',
-                  opacity: (pressed || disabled) ? 0.6 : 1,
-                } as ViewStyle,
-              ]}
-            >
-              <Text
-                style={{
-                  fontSize: 14,
-                  color: text,
-                  fontWeight: '400',
-                }}
-              >
-                {chip.text}
-              </Text>
-            </Pressable>
-          ))}
-        </View>
-      )}
     </View>
   );
 }

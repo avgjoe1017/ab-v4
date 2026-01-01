@@ -69,7 +69,7 @@ export class AudioEngine {
     status: "idle",
     positionMs: 0,
     durationMs: 0,
-    mix: { affirmations: 1, binaural: 0.3, background: 0.3 }, // Default to 30% for binaural and background
+    mix: { affirmations: 1, binaural: 0.05, background: 0.3 }, // Default: affirmations 100%, background 30%, binaural 5%
     sessionDurationCapMs: "unlimited",
     totalPlaybackTimeMs: 0,
   };
@@ -191,15 +191,15 @@ export class AudioEngine {
         const duration = this.affPlayer.duration * 1000; // seconds to ms
         
         // P1.1: Track total playback time for Free tier cap (5 minutes)
+        // Compute currentTotalMs once per tick (only if playing)
+        let totalPlaybackTimeMsToUse: number;
         if (this.snapshot.status === "playing" && this.sessionStartTime) {
           const now = Date.now();
           // Calculate elapsed time since current play session started
           const elapsedSinceStart = now - this.sessionStartTime;
           // Current total = previously accumulated time + current session elapsed time
           const currentTotalMs = this.totalPlaybackTimeMs + elapsedSinceStart;
-          
-          // Update snapshot with current total (for UI display)
-          // Note: We don't update this.totalPlaybackTimeMs here - that happens on pause/stop
+          totalPlaybackTimeMsToUse = currentTotalMs;
           
           // Check if we've hit the duration cap
           if (
@@ -213,18 +213,17 @@ export class AudioEngine {
               this.startFadeOut();
             }
           }
-          
-          // Update snapshot with current total time
-          this.setState({
-            totalPlaybackTimeMs: currentTotalMs,
-          });
+        } else {
+          // Not playing - use stored total
+          totalPlaybackTimeMsToUse = this.totalPlaybackTimeMs;
         }
         
+        // Single setState per tick with all values
         this.setState({ 
           positionMs: pos,
           durationMs: duration,
           sessionDurationCapMs: this.sessionDurationCapMs,
-          totalPlaybackTimeMs: this.totalPlaybackTimeMs,
+          totalPlaybackTimeMs: totalPlaybackTimeMsToUse,
         });
       }
     }, 250);
@@ -309,14 +308,30 @@ export class AudioEngine {
         failedRestarts: number,
         setStoppedAt: (t: number) => void,
         setLastPosition: (p: number) => void,
-        setFailedRestarts: (n: number) => void
+        setFailedRestarts: (n: number) => void,
+        isLoopingTrack: boolean = false // Background and binaural are looping
       ) => {
         if (!player) return;
         
         // Skip if duration is invalid (NaN, 0, or negative)
-        // This indicates the player never loaded properly (404, network error, etc.)
+        // BUT: If player is actually playing, duration NaN is OK (expo-audio sometimes reports NaN during initial load)
         const playerDuration = player.duration;
         if (isNaN(playerDuration) || playerDuration <= 0) {
+          // If player is actually playing, duration NaN is fine - expo-audio will load it eventually
+          if (player.playing) {
+            // Player is playing, just update position and return (don't treat as failure)
+            setLastPosition(player.currentTime);
+            if (stoppedAt !== 0) setStoppedAt(0); // Reset any stopped timer
+            if (failedRestarts > 0) setFailedRestarts(0); // Reset failed count if it was playing
+            return;
+          }
+          
+          // Player is NOT playing and duration is invalid - this is a real problem
+          // For looping tracks (background, binaural), be more lenient - they may take longer to load
+          // Remote/streaming sources can report NaN duration for a while
+          const isLooping = isLoopingTrack || (player as any).loop === true;
+          const loadTimeout = isLooping ? 10000 : 2000; // 10 seconds for looping, 2 seconds for non-looping
+          
           // If we've already tried to restart multiple times, give up
           if (failedRestarts >= AudioEngine.MAX_FAILED_RESTARTS) {
             // Only log once to avoid spam (log exactly when we hit the limit, not after)
@@ -332,8 +347,8 @@ export class AudioEngine {
             setStoppedAt(now);
           } else {
             const waitDuration = now - stoppedAt;
-            // Give it 2 seconds to load before marking as failed
-            if (waitDuration >= 2000) {
+            // Give it more time for looping tracks (remote sources can be slow)
+            if (waitDuration >= loadTimeout) {
               const newFailedCount = failedRestarts + 1;
               setFailedRestarts(newFailedCount);
               console.warn(`[AudioEngine] ⚠️  ${name} still not loaded after ${waitDuration}ms (duration: ${playerDuration}). Failed attempt ${newFailedCount}/${AudioEngine.MAX_FAILED_RESTARTS}`);
@@ -362,10 +377,28 @@ export class AudioEngine {
         const isAdvancing = Math.abs(currentPos - lastPosition) > 0.01; // 10ms tolerance
         
         if (player.playing && isAdvancing) {
-          // Playing and advancing - reset stopped timer
+          // Playing and advancing - reset stopped timer and failed count
           if (stoppedAt !== 0) setStoppedAt(0);
+          if (failedRestarts > 0) setFailedRestarts(0); // Reset failed count if playing successfully
           setLastPosition(currentPos);
           return;
+        }
+        
+        // If player should be playing but isn't, and we're in playing state, try to start it
+        // This handles cases where the player was created but never started
+        if (!player.playing && this.snapshot.status === "playing" && failedRestarts === 0 && stoppedAt === 0) {
+          // Player exists but isn't playing - try to start it (only once, don't spam)
+          console.log(`[AudioEngine] ${name} exists but not playing - attempting to start`);
+          Promise.resolve(player.play()).then(() => {
+            // Success - reset any timers
+            setStoppedAt(0);
+            setLastPosition(player.currentTime);
+          }).catch((err: unknown) => {
+            console.warn(`[AudioEngine] Failed to start ${name}:`, err);
+            // Start the stopped timer so watchdog can handle it
+            setStoppedAt(now);
+          });
+          return; // Don't check further this tick
         }
         
         // Not playing or not advancing - start or check debounce timer
@@ -439,23 +472,27 @@ export class AudioEngine {
       };
       
       // Check all three players with debouncing (buffer-aware, EOF-aware)
+      // Background and binaural are looping tracks - be more lenient with NaN duration
       checkAndRestartPlayer(
         this.affPlayer, "Affirmations", this.affStoppedAt, this.affLastPosition, this.affFailedRestarts,
         (t) => { this.affStoppedAt = t; },
         (p) => { this.affLastPosition = p; },
-        (n) => { this.affFailedRestarts = n; }
+        (n) => { this.affFailedRestarts = n; },
+        false // Affirmations are not looping
       );
       checkAndRestartPlayer(
         this.binPlayer, "Binaural", this.binStoppedAt, this.binLastPosition, this.binFailedRestarts,
         (t) => { this.binStoppedAt = t; },
         (p) => { this.binLastPosition = p; },
-        (n) => { this.binFailedRestarts = n; }
+        (n) => { this.binFailedRestarts = n; },
+        true // Binaural is looping
       );
       checkAndRestartPlayer(
         this.bgPlayer, "Background", this.bgStoppedAt, this.bgLastPosition, this.bgFailedRestarts,
         (t) => { this.bgStoppedAt = t; },
         (p) => { this.bgLastPosition = p; },
-        (n) => { this.bgFailedRestarts = n; }
+        (n) => { this.bgFailedRestarts = n; },
+        true // Background is looping
       );
     } else {
       // Not playing - reset all stopped timers and failed restart counts
@@ -590,12 +627,28 @@ export class AudioEngine {
         // Also cache remote URIs locally to avoid network buffering stalls
         console.log("[AudioEngine] Creating bgPlayer...");
         try {
-          const bgUri = await toCachedUri(getUrl(bundle.background));
+          const bgUrl = getUrl(bundle.background);
+          console.log("[AudioEngine] Background URL from bundle:", bgUrl);
+          
+          if (!bgUrl || bgUrl === "unknown") {
+            throw new Error(`Invalid background URL: ${bgUrl}`);
+          }
+          
+          const bgUri = await toCachedUri(bgUrl);
+          console.log("[AudioEngine] Background URI (after caching):", bgUri);
+          
           this.bgPlayer = createAudioPlayer({ uri: bgUri });
           this.bgPlayer.loop = true; // Force loop - bed tracks must loop continuously
-          console.log("[AudioEngine] Created bgPlayer successfully, loop:", this.bgPlayer.loop, "cached:", bgUri.startsWith("file://"));
+          
+          console.log("[AudioEngine] Created bgPlayer successfully:", {
+            loop: this.bgPlayer.loop,
+            cached: bgUri.startsWith("file://"),
+            originalUrl: bgUrl,
+            finalUri: bgUri
+          });
         } catch (err) {
-          console.error("[AudioEngine] Failed to create bgPlayer:", err);
+          console.error("[AudioEngine] ❌ CRITICAL: Failed to create bgPlayer:", err);
+          console.error("[AudioEngine] Background bundle data:", bundle.background);
           throw new Error(`Failed to create background player: ${err}`);
         }
 
@@ -660,7 +713,7 @@ export class AudioEngine {
         console.log("[AudioEngine] Setting status to:", targetStatus);
         this.setState({
           status: targetStatus,
-          mix: bundle.mix,
+          mix: mixToUse, // Use preserved mix, not bundle.mix
           durationMs: 0 // Will be updated by playbackStatusUpdate listener
         });
         
@@ -830,39 +883,96 @@ export class AudioEngine {
         console.log("[AudioEngine] Step 1: Starting background player...");
         const bgUrl = this.currentBundle && getUrl ? getUrl(this.currentBundle.background) : "unknown";
         console.log("[AudioEngine] Background URL:", bgUrl);
+        console.log("[AudioEngine] Background player exists:", !!this.bgPlayer);
+        console.log("[AudioEngine] Background player loop:", this.bgPlayer?.loop);
+        console.log("[AudioEngine] Background player volume:", this.bgPlayer?.volume);
+        
+        if (!this.bgPlayer) {
+          console.error("[AudioEngine] ❌ Background player is null! Cannot start.");
+          throw new Error("Background player is null");
+        }
         
         try {
           // Call play() to trigger loading
           console.log("[AudioEngine] Calling play() on background player...");
-          await this.bgPlayer!.play();
+          await this.bgPlayer.play();
           console.log("[AudioEngine] Background play() called, waiting for ready...");
           
-          // Wait for ready with shorter timeout - network files should load quickly from S3
+          // Wait for ready with longer timeout for remote files
+          // CRITICAL: Must wait for valid duration, not just playing=true
           try {
-            await waitForPlayerReady(this.bgPlayer!, "Background", 5000); // Reduced to 5s
+            await waitForPlayerReady(this.bgPlayer, "Background", 15000); // 15 seconds for remote files
           } catch (waitError) {
-            console.warn("[AudioEngine] ⚠️  Background waitForPlayerReady timed out, but continuing anyway");
-            // Don't wait - just continue
+            console.error("[AudioEngine] ❌ Background waitForPlayerReady failed:", waitError);
+            // Check if we at least have a valid duration now
+            if (isNaN(this.bgPlayer.duration) || this.bgPlayer.duration <= 0) {
+              throw new Error(`Background player failed to load - no valid duration after timeout. URL: ${bgUrl}`);
+            }
           }
           
-          // Quick retry if not playing
-          if (!this.bgPlayer!.playing) {
-            await this.bgPlayer!.play();
-            await new Promise(resolve => setTimeout(resolve, 200)); // Reduced wait
+          // CRITICAL CHECK: Must have valid duration to proceed
+          // expo-audio can report playing=true even when file hasn't loaded
+          const hasValidDuration = !isNaN(this.bgPlayer.duration) && this.bgPlayer.duration > 0;
+          if (!hasValidDuration) {
+            console.error("[AudioEngine] ❌ Background player has no valid duration!");
+            console.error("[AudioEngine] Background player state:", {
+              playing: this.bgPlayer.playing,
+              volume: this.bgPlayer.volume,
+              duration: this.bgPlayer.duration,
+              loop: this.bgPlayer.loop,
+              currentTime: this.bgPlayer.currentTime,
+              url: bgUrl
+            });
+            throw new Error(`Background player has no valid duration. URL: ${bgUrl}`);
           }
           
-          if (this.bgPlayer!.playing) {
-            console.log("[AudioEngine] ✅ Background started, intro automation will fade in over 4s");
+          // Multiple retry attempts if not playing (but we have duration)
+          let retryCount = 0;
+          const maxRetries = 5;
+          while (!this.bgPlayer.playing && retryCount < maxRetries) {
+            console.log(`[AudioEngine] Background not playing (but has duration), retry ${retryCount + 1}/${maxRetries}...`);
+            await this.bgPlayer.play();
+            await new Promise(resolve => setTimeout(resolve, 500)); // Wait 500ms between retries
+            retryCount++;
+          }
+          
+          // Final check - must have both valid duration AND be playing
+          if (this.bgPlayer.playing && hasValidDuration) {
+            console.log("[AudioEngine] ✅ Background started successfully, intro automation will fade in over 4s");
+            console.log("[AudioEngine] Background player state:", {
+              playing: this.bgPlayer.playing,
+              volume: this.bgPlayer.volume,
+              duration: this.bgPlayer.duration,
+              loop: this.bgPlayer.loop,
+              currentTime: this.bgPlayer.currentTime
+            });
           } else {
-            console.error("[AudioEngine] ❌ Background player failed to start after multiple attempts!");
+            console.error(`[AudioEngine] ❌ Background player FAILED to start after ${maxRetries} attempts!`);
+            console.error("[AudioEngine] Background player state:", {
+              playing: this.bgPlayer.playing,
+              volume: this.bgPlayer.volume,
+              duration: this.bgPlayer.duration,
+              loop: this.bgPlayer.loop,
+              currentTime: this.bgPlayer.currentTime,
+              url: bgUrl,
+              hasValidDuration
+            });
             console.error("[AudioEngine] Check if audio file exists and is accessible:", bgUrl);
-            // Continue anyway - control loop will handle it
-            console.warn("[AudioEngine] Continuing playback - background may start later");
+            // Don't continue - this is a critical failure
+            throw new Error(`Background player failed to start. URL: ${bgUrl}, duration: ${this.bgPlayer.duration}, playing: ${this.bgPlayer.playing}`);
           }
         } catch (error) {
-          console.error("[AudioEngine] ❌ Error starting background player:", error);
+          console.error("[AudioEngine] ❌ CRITICAL ERROR starting background player:", error);
           console.error("[AudioEngine] Audio file URL:", bgUrl);
-          // Continue anyway - don't block other players
+          console.error("[AudioEngine] Background player state:", {
+            exists: !!this.bgPlayer,
+            playing: this.bgPlayer?.playing,
+            volume: this.bgPlayer?.volume,
+            duration: this.bgPlayer?.duration,
+            loop: this.bgPlayer?.loop
+          });
+          // Re-throw to prevent silent failure
+          throw error;
         }
         
         // Brief pause before starting brain layer (staggered start)

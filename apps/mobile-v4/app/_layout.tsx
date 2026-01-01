@@ -21,6 +21,13 @@ export default function RootLayout() {
           title: 'How Affirmations Work',
         }}
       />
+      <Stack.Screen
+        name="settings"
+        options={{
+          presentation: 'modal',
+          title: 'Settings',
+        }}
+      />
     </Stack>
   );
 }

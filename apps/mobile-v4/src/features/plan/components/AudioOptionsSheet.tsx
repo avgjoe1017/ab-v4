@@ -502,7 +502,7 @@ export function AudioOptionsSheet({
         onDismiss={() => setShowPaywall(false)}
         onUpgrade={() => {
           setShowPaywall(false);
-          router.push('/(tabs)/settings');
+          router.push('/settings');
         }}
         title={getPaywallTitle()}
         message={getPaywallMessage()}

@@ -15,8 +15,10 @@ export async function waitForPlayerReady(
   playerName: string,
   maxWaitMs: number = 10000
 ): Promise<void> {
-  // Fast path - check if already ready (has valid duration or is playing)
-  if (player.duration > 0 || player.playing) {
+  // Fast path - check if already ready (must have valid duration)
+  // Don't trust playing=true alone - expo-audio can report this before file loads
+  const hasValidDuration = player.duration > 0 && !isNaN(player.duration);
+  if (hasValidDuration || (player as any).isLoaded === true) {
     console.log(`[PlayerManager] ${playerName} already ready (duration: ${player.duration}, playing: ${player.playing})`);
     return;
   }
@@ -37,22 +39,23 @@ export async function waitForPlayerReady(
 
     const checkReady = (): boolean => {
       // Check multiple indicators that player is ready:
-      // 1. Valid duration (> 0)
+      // 1. Valid duration (> 0) - THIS IS THE PRIMARY INDICATOR
       // 2. isLoaded property (if available)
-      // 3. Actually playing
+      // 3. Actually playing AND has valid duration (don't trust playing alone)
       // 4. Not buffering (if buffering is false and we have some state, consider ready)
       const hasDuration = player.duration > 0 && !isNaN(player.duration);
       const isLoaded = (player as any).isLoaded === true;
       const isPlaying = player.playing;
       const isNotBuffering = (player as any).isBuffering === false;
       
-      // If we have duration or is loaded, we're ready
+      // PRIMARY: If we have duration or is loaded, we're ready
       if (hasDuration || isLoaded) {
         return true;
       }
       
-      // If playing, we're definitely ready
-      if (isPlaying) {
+      // SECONDARY: If playing AND has valid duration, we're ready
+      // Don't trust playing alone - expo-audio can report playing=true before file loads
+      if (isPlaying && hasDuration) {
         return true;
       }
       
@@ -106,7 +109,8 @@ export async function waitForPlayerReady(
       const statusHasDuration = status?.duration > 0 && !isNaN(status.duration);
       const statusIsPlaying = status?.playing === true;
 
-      if (statusIsLoaded || statusHasDuration || statusIsPlaying || checkReady()) {
+      // Require valid duration OR isLoaded - don't trust playing alone
+      if (statusIsLoaded || statusHasDuration || checkReady()) {
         done = true;
         console.log(`[PlayerManager] ✅ ${playerName} ready (event) - duration: ${player.duration}, status duration: ${status?.duration}, playing: ${player.playing}`);
         cleanup(listener);

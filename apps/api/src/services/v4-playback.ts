@@ -7,6 +7,7 @@ import { prisma } from "../lib/db";
 import { getEntitlementV4 } from "./v4-entitlements";
 import { getBinauralAsset, getBackgroundAsset, getSolfeggioAsset, DEFAULT_BACKGROUND_ID } from "./audio/assets";
 import { isSilentModeForced, isBrainTrackFrequencyDisabled, isBackgroundDisabled } from "./v4-kill-switches";
+import { getBrainTrackForSession } from "./audio/brain-track-mapping";
 import type { PlanV4 } from "@ab/contracts";
 
 export interface PlaybackBundleV4 {
@@ -100,6 +101,7 @@ export async function getPlaybackBundleV4(
   );
 
   // Get brain track (always available - bundled)
+  // AudioEngine REQUIRES either binaural or solfeggio, so we must always provide a default
   let binauralAsset: { urlByPlatform: { ios: string; android: string }; loop: true; hz: number } | undefined;
   let solfeggioAsset: { urlByPlatform: { ios: string; android: string }; loop: true; hz: number } | undefined;
   
@@ -113,7 +115,7 @@ export async function getPlaybackBundleV4(
           apiBaseUrl
         );
       } catch (error) {
-        console.warn("[V4 Playback] Failed to get binaural asset, falling back to none");
+        console.warn("[V4 Playback] Failed to get binaural asset, falling back to default");
       }
     } else {
       console.warn(`[V4 Playback] Binaural frequency ${requestedHz}Hz is disabled by kill switch`);
@@ -128,10 +130,38 @@ export async function getPlaybackBundleV4(
           apiBaseUrl
         );
       } catch (error) {
-        console.warn("[V4 Playback] Failed to get solfeggio asset, falling back to none");
+        console.warn("[V4 Playback] Failed to get solfeggio asset, falling back to default binaural");
       }
     } else {
       console.warn(`[V4 Playback] Solfeggio frequency ${requestedHz}Hz is disabled by kill switch`);
+    }
+  }
+  
+  // CRITICAL: AudioEngine requires either binaural or solfeggio
+  // If none was set (no audioConfig, or failed to load), use intelligent defaults based on session type
+  if (!binauralAsset && !solfeggioAsset) {
+    // Get session type from plan title or default to "Meditate"
+    // The plan title often indicates intent (e.g., "Focus session", "Sleep better")
+    const sessionType = plan.title || "Meditate";
+    const intent = plan.writtenGoal || undefined;
+    
+    // Get recommended brain track based on session type and intent
+    const mapping = getBrainTrackForSession(sessionType, intent, "binaural");
+    
+    try {
+      binauralAsset = await getBinauralAsset(mapping.hz, apiBaseUrl);
+      console.log(`[V4 Playback] Using session-appropriate binaural: ${mapping.hz}Hz (${mapping.rationale})`);
+    } catch (error) {
+      // Fallback to default Alpha 10Hz if the specific frequency isn't available
+      console.warn(`[V4 Playback] Failed to get ${mapping.hz}Hz, falling back to Alpha 10Hz`);
+      try {
+        binauralAsset = await getBinauralAsset(10, apiBaseUrl);
+        console.log("[V4 Playback] Using fallback binaural: Alpha 10Hz");
+      } catch (fallbackError) {
+        console.error("[V4 Playback] Failed to get fallback binaural asset:", fallbackError);
+        // This is a critical error - AudioEngine will fail without a brain track
+        throw new Error("Failed to load default binaural asset");
+      }
     }
   }
 
@@ -145,9 +175,14 @@ export async function getPlaybackBundleV4(
   let voiceUrl: string | undefined;
   let fallbackMode: "full" | "voice_pending" | "silent" = "full";
 
+  // Define silence fallback URL for when voice isn't ready
+  // This is a real audio file that expo-audio can load (data URLs don't work)
+  const silenceUrl = `${apiBaseUrl}/assets/audio/silence_3min.m4a`;
+
   if (forceSilent) {
     // P1-10.2: Kill switch forces silent mode - skip voice entirely
     fallbackMode = "silent";
+    voiceUrl = silenceUrl; // Use real silence file, not data URL
   } else {
     if (session?.audio?.mergedAudioAsset?.url) {
       const filePath = session.audio.mergedAudioAsset.url;
@@ -161,14 +196,11 @@ export async function getPlaybackBundleV4(
         fallbackMode = "full";
       }
     } else {
-      // P0 GAP FIX: Voice not ready - check if we should use silent mode
-      // After a timeout period, switch to silent mode (text-only affirmations)
-      // For now, use voice_pending; client can check job status and switch to silent if needed
+      // P0 GAP FIX: Voice not ready - use silence file while audio generates
+      // Client will poll for status and reload when voice is ready
       fallbackMode = "voice_pending";
-      
-      // P0.6: If voice generation failed or is stuck, offer silent mode
-      // This would require checking job status - for now, client handles the transition
-      // TODO: Check audio job status and set to "silent" if job failed
+      voiceUrl = silenceUrl; // Use real silence file so AudioEngine doesn't fail
+      console.log("[V4 Playback] Voice not ready, using silence placeholder");
     }
   }
 

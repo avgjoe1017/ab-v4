@@ -54,17 +54,20 @@ export function convertPlaybackBundleV4ToVM(
   if (bundle.fallbackMode === 'full' && bundle.voiceUrl) {
     // Full mode: use actual voice URL
     affirmationsMergedUrl = bundle.voiceUrl;
-  } else if (bundle.fallbackMode === 'voice_pending') {
-    // Voice pending: use a silent placeholder URL
+  } else if (bundle.fallbackMode === 'voice_pending' && bundle.voiceUrl) {
+    // Voice pending: API provides a real silence audio file URL
     // AudioEngine will play this (silent audio) while background/brain tracks play
     // Client should display timed text affirmations
-    // TODO: Create a silent audio file or use a data URI
-    // For now, use a placeholder that won't break AudioEngine
-    affirmationsMergedUrl = bundle.voiceUrl || 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=';
-  } else {
-    // Silent mode: use silent placeholder
+    affirmationsMergedUrl = bundle.voiceUrl;
+  } else if (bundle.voiceUrl) {
+    // Silent mode with URL: API provides silence file
     // Client must handle text-only affirmations
-    affirmationsMergedUrl = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=';
+    affirmationsMergedUrl = bundle.voiceUrl;
+  } else {
+    // Fallback: This should not happen if API is working correctly
+    // Log an error and throw - we need a valid URL for AudioEngine
+    console.error('[BundleConverter] No voiceUrl provided in bundle - this indicates an API issue');
+    throw new Error('No voice URL provided in playback bundle');
   }
 
   // P1-2.4: Ensure we have either binaural or solfeggio (AudioEngine requires one)

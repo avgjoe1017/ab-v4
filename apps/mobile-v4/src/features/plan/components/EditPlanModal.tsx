@@ -319,7 +319,7 @@ export function EditPlanModal({
         onDismiss={() => setShowPaywall(false)}
         onUpgrade={() => {
           setShowPaywall(false);
-          router.push('/(tabs)/settings');
+          router.push('/settings');
         }}
         title="Unlock more affirmations"
         message="Choose 12, 18, or 24 affirmations with a paid plan."

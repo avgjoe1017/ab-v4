@@ -2,23 +2,28 @@ import { Icon } from '@/ui/components/icon';
 import { Text } from '@/ui/components/text';
 import { View } from '@/ui/components/view';
 import { useColor } from '@/ui/hooks/useColor';
-import { ChevronDown, Copy, Sparkles, Settings } from 'lucide-react-native';
+import { ChevronDown, Menu, Settings } from 'lucide-react-native';
 import { Pressable } from 'react-native';
 import React, { useState } from 'react';
+import { useRouter } from 'expo-router';
 import { PrivacySheet } from '@/features/shared/components/PrivacySheet';
 
 interface ChatHeaderProps {
-  onLibraryPress?: () => void;
-  onNewChatPress?: () => void;
+  onMenuPress?: () => void;
 }
 
-export function ChatHeader({ onLibraryPress, onNewChatPress }: ChatHeaderProps) {
+export function ChatHeader({ onMenuPress }: ChatHeaderProps) {
   const background = useColor('background');
   const text = useColor('text');
   const mutedText = useColor('textMuted');
   const border = useColor('border');
   const card = useColor('card');
+  const router = useRouter();
   const [showPrivacySheet, setShowPrivacySheet] = useState(false);
+
+  const handleSettingsPress = () => {
+    router.push('/settings');
+  };
 
   return (
     <>
@@ -37,23 +42,10 @@ export function ChatHeader({ onLibraryPress, onNewChatPress }: ChatHeaderProps) 
     >
       <Pressable
         accessibilityRole="button"
-        onPress={onLibraryPress}
+        onPress={onMenuPress}
         style={{ width: 32, height: 32, alignItems: 'center', justifyContent: 'center' }}
       >
-        <View
-          style={{
-            width: 26,
-            height: 26,
-            borderRadius: 999,
-            backgroundColor: card,
-            borderWidth: 1,
-            borderColor: border,
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          <Icon name={Sparkles} size={14} color={mutedText} />
-        </View>
+        <Icon name={Menu} size={24} color={text} />
       </Pressable>
 
       <Pressable
@@ -77,20 +69,10 @@ export function ChatHeader({ onLibraryPress, onNewChatPress }: ChatHeaderProps) 
 
       <Pressable
         accessibilityRole="button"
-        onPress={onNewChatPress}
+        onPress={handleSettingsPress}
         style={{ width: 32, height: 32, alignItems: 'center', justifyContent: 'center' }}
       >
-        <View
-          style={{
-            width: 26,
-            height: 26,
-            borderRadius: 6,
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          <Icon name={Copy} size={18} color={mutedText} />
-        </View>
+        <Icon name={Settings} size={24} color={text} />
       </Pressable>
 
       {/* P1-9.1: Privacy Sheet */}
